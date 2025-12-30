@@ -15,43 +15,6 @@ type Session struct {
 	Messages  []Message `json:"messages"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-
-	// 兼容旧格式的大写字段名
-	IDCompat        string    `json:"ID,omitempty"`
-	MessagesCompat  []Message `json:"Messages,omitempty"`
-	CreatedAtCompat time.Time `json:"CreatedAt,omitempty"`
-	UpdatedAtCompat time.Time `json:"UpdatedAt,omitempty"`
-}
-
-// UnmarshalJSON 自定义 JSON 反序列化，兼容旧格式
-func (s *Session) UnmarshalJSON(data []byte) error {
-	// 定义别名类型避免递归调用
-	type Alias Session
-	aux := &struct {
-		*Alias
-	}{
-		Alias: (*Alias)(s),
-	}
-
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-
-	// 如果新字段为空，从旧字段复制
-	if s.ID == "" && s.IDCompat != "" {
-		s.ID = s.IDCompat
-	}
-	if len(s.Messages) == 0 && len(s.MessagesCompat) > 0 {
-		s.Messages = s.MessagesCompat
-	}
-	if s.CreatedAt.IsZero() && !s.CreatedAtCompat.IsZero() {
-		s.CreatedAt = s.CreatedAtCompat
-	}
-	if s.UpdatedAt.IsZero() && !s.UpdatedAtCompat.IsZero() {
-		s.UpdatedAt = s.UpdatedAtCompat
-	}
-
-	return nil
 }
 
 // SessionData 会话数据（用于存储）
@@ -118,9 +81,10 @@ func (sm *SessionManager) load() error {
 	// 转换为指针类型，确保使用 key 作为 ID（优先于对象内部的 ID 字段）
 	sm.sessions = make(map[string]*Session)
 	for id, sess := range sessionData.Sessions {
-		// 使用 map 的 key 作为正确的 ID，而不是对象内部可能不一致的 ID 字段
-		sess.ID = id
-		sm.sessions[id] = &sess
+		// 使用 map 的 key 作为正确的 ID，创建新指针避免所有会话指向同一地址
+		newSess := sess
+		newSess.ID = id
+		sm.sessions[id] = &newSess
 	}
 
 	return nil
@@ -229,8 +193,7 @@ func (sm *SessionManager) GetAllSessions() []Session {
 	defer sm.mu.RUnlock()
 
 	result := make([]Session, 0, len(sm.sessions))
-	for id, sess := range sm.sessions {
-		fmt.Printf("[DEBUG GetAllSessions] id=%s, sess.ID=%s\n", id, sess.ID)
+	for _, sess := range sm.sessions {
 		result = append(result, *sess)
 	}
 	return result
