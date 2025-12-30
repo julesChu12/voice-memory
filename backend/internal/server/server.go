@@ -28,13 +28,45 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("初始化数据库失败: %w", err)
 	}
 
-	// 创建服务
-	sttService := service.NewBaiduSTT(cfg.BaiduAPIKey, cfg.BaiduSecretKey)
-	glmClient := service.NewGLMClient(cfg.GLMAPIKey)
-
 	// 会话和音频目录
 	sessionDir := fmt.Sprintf("%s/sessions", dataDir)
 	audioDir := fmt.Sprintf("%s/audio", dataDir)
+
+	// 创建服务
+	sttService := service.NewBaiduSTT(cfg.BaiduAPIKey, cfg.BaiduSecretKey)
+	ttsService := service.NewBaiduTTSWithDir(cfg.BaiduAPIKey, cfg.BaiduSecretKey, audioDir)
+	glmClient := service.NewGLMClient(cfg.GLMAPIKey)
+
+	// 创建 RAG 服务
+	ragService := service.NewRAGService(cfg.GLMAPIKey)
+
+	// 加载现有知识到向量库
+	knowledges, err := database.GetAllKnowledge()
+	if err == nil && len(knowledges) > 0 {
+		// 限制最多加载 100 条
+		maxLoad := 100
+		if len(knowledges) > maxLoad {
+			knowledges = knowledges[:maxLoad]
+		}
+		fmt.Printf("📚 正在加载 %d 条知识到向量库...\n", len(knowledges))
+		for i, k := range knowledges {
+			metadata := map[string]interface{}{
+				"category":   k.Category,
+				"tags":       k.Tags,
+				"summary":    k.Summary,
+				"key_points": k.KeyPoints,
+				"source":     k.Source,
+				"created_at": k.CreatedAt,
+			}
+			if err := ragService.AddKnowledge(k.ID, k.Content, metadata); err != nil {
+				fmt.Printf("⚠️  知识 %s 向量化失败: %v\n", k.ID, err)
+			}
+			if (i+1)%20 == 0 {
+				fmt.Printf("   已加载 %d/%d\n", i+1, len(knowledges))
+			}
+		}
+		fmt.Printf("✅ 向量库初始化完成，共 %d 条知识\n", ragService.GetKnowledgeCount())
+	}
 
 	// 创建会话管理器
 	sessionManager, err := service.NewSessionManagerWithStorage(sessionDir)
@@ -48,10 +80,12 @@ func New(cfg *config.Config) (*Server, error) {
 
 	// 创建处理器
 	sttHandler := handler.NewSTTHandler(sttService)
-	chatHandler := handler.NewChatHandlerWithSession(glmClient, sessionManager)
+	chatHandler := handler.NewChatHandlerWithRAG(glmClient, sessionManager, ttsService, ragService)
 	audioChatHandler := handler.NewAudioChatHandler(glmClient)
 	knowledgeHandler := handler.NewKnowledgeHandler(sttService, knowledgeOrganizer, database, audioDir)
+	knowledgeHandler.SetRAGService(ragService) // 设置 RAG 服务
 	sessionHandler := handler.NewSessionHandler(sessionManager)
+	ttsHandler := handler.NewTTSHandler(ttsService)
 
 	// 配置路由
 	httpServer := router.Setup(router.RouterConfig{
@@ -60,6 +94,7 @@ func New(cfg *config.Config) (*Server, error) {
 		AudioChatHandler: audioChatHandler,
 		KnowledgeHandler: knowledgeHandler,
 		SessionHandler:   sessionHandler,
+		TTSHandler:       ttsHandler,
 	})
 
 	return &Server{
@@ -94,9 +129,12 @@ func (s *Server) printRoutes(addr string) {
 	fmt.Printf("🎤 STT 接口: http://localhost%s/api/stt\n", addr)
 	fmt.Printf("🤖 Chat 接口: http://localhost%s/api/chat\n", addr)
 	fmt.Printf("🎙️  Audio Chat: http://localhost%s/api/audio-chat\n", addr)
+	fmt.Printf("🔊 TTS 接口: http://localhost%s/api/tts?text=xxx\n", addr)
+	fmt.Printf("🎵 音频文件: http://localhost%s/api/audio/:filename\n", addr)
 	fmt.Printf("📚 知识记录: http://localhost%s/api/knowledge/record\n", addr)
 	fmt.Printf("📋 知识列表: http://localhost%s/api/knowledge/list\n", addr)
 	fmt.Printf("🔍 知识搜索: http://localhost%s/api/knowledge/search\n", addr)
 	fmt.Printf("💬 会话列表: http://localhost%s/api/sessions\n", addr)
-	fmt.Printf("💚 健康检查: http://localhost%s/health\n\n", addr)
+	fmt.Printf("💚 健康检查: http://localhost%s/health\n", addr)
+	fmt.Printf("🧠 RAG 检索: 已启用 (向量搜索)\n\n", addr)
 }

@@ -59,6 +59,10 @@ func (o *KnowledgeOrganizer) Organize(content string) (*KnowledgeOrganizeResult,
 
 	// 解析 JSON 响应
 	reply := resp.GetReplyText()
+
+	// 清理可能的 markdown 代码块标记
+	reply = cleanMarkdownCode(reply)
+
 	var result KnowledgeOrganizeResult
 	if err := json.Unmarshal([]byte(reply), &result); err != nil {
 		// 如果解析失败，返回基础整理
@@ -73,9 +77,97 @@ func (o *KnowledgeOrganizer) Organize(content string) (*KnowledgeOrganizeResult,
 	return &result, nil
 }
 
+// cleanMarkdownCode 清理 markdown 代码块标记
+func cleanMarkdownCode(s string) string {
+	// 去除开头的 ```json 或 ```
+	if len(s) > 7 && s[0:7] == "```json" {
+		s = s[7:]
+	} else if len(s) > 3 && s[0:3] == "```" {
+		s = s[3:]
+	}
+
+	// 去除结尾的 ```
+	if len(s) > 3 && s[len(s)-3:] == "```" {
+		s = s[:len(s)-3]
+	}
+
+	return s
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a
 	}
 	return b
+}
+
+// GenerateTitleFromSession 根据会话内容生成标题
+func (o *KnowledgeOrganizer) GenerateTitleFromSession(session *Session) (string, error) {
+	// 构建会话摘要提示
+	var conversationText string
+	for i, msg := range session.Messages {
+		role := "用户"
+		if msg.Role == "assistant" {
+			role = "AI助手"
+		}
+		conversationText += fmt.Sprintf("%d. %s: %s\n", i+1, role, msg.Content)
+	}
+
+	systemPrompt := `你是 Voice Memory 的会话标题生成助手。
+
+【任务】根据对话内容生成一个简洁的标题。
+
+【要求】
+1. 标题长度：5-15个字符
+2. 简洁明了，一眼就能看出对话主题
+3. 使用简体中文
+4. 如果对话涉及具体主题（如技术、产品、事件等），标题应体现该主题
+
+【输出格式】直接输出标题，不要任何其他文字或标点符号包裹
+
+【对话内容】`
+
+	messages := []Message{
+		{
+			Role:    "user",
+			Content: systemPrompt + "\n\n" + conversationText,
+		},
+	}
+
+	req := ChatRequest{
+		Model:       "glm-4-flash",
+		MaxTokens:   100,
+		Messages:    messages,
+		Temperature: 0.3,
+	}
+
+	resp, err := o.glmClient.SendMessage(req)
+	if err != nil {
+		return "", fmt.Errorf("AI 生成标题失败: %w", err)
+	}
+
+	title := resp.GetReplyText()
+	// 清理可能的 markdown 代码块标记
+	if len(title) > 3 {
+		if title[0:3] == "```" {
+			title = title[3:]
+		}
+		if len(title) > 3 && title[len(title)-3:] == "```" {
+			title = title[:len(title)-3]
+		}
+	}
+	// 去除可能的引号
+	title = trimQuotes(title)
+
+	return title, nil
+}
+
+// trimQuotes 去除字符串两端的引号
+func trimQuotes(s string) string {
+	if len(s) >= 2 {
+		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return s
 }

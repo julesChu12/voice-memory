@@ -3,11 +3,18 @@ package main
 import (
 	"fmt"
 	"log"
+
+	"github.com/joho/godotenv"
 	"voice-memory/internal/config"
 	"voice-memory/internal/server"
 )
 
 func main() {
+	// 加载 .env 文件
+	if err := godotenv.Load(); err != nil {
+		log.Println("⚠️  未找到 .env 文件，使用环境变量")
+	}
+
 	// 加载配置
 	cfg := config.Load()
 

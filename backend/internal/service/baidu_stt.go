@@ -215,3 +215,15 @@ func (b *BaiduSTT) Recognize(req *RecognizeRequest) ([]string, error) {
 
 	return sttResp.Result, nil
 }
+
+// GetTokenInfo 获取当前 token 信息（供 TTS 复用）
+func (b *BaiduSTT) GetTokenInfo() (string, time.Time, error) {
+	if b.token == "" || time.Now().After(b.tokenExp) {
+		// 尝试从文件加载
+		if b.loadTokenFromFile() {
+			return b.token, b.tokenExp, nil
+		}
+		return "", time.Time{}, fmt.Errorf("token 无效或已过期")
+	}
+	return b.token, b.tokenExp, nil
+}

@@ -17,6 +17,7 @@ type KnowledgeHandler struct {
 	organizer    *service.KnowledgeOrganizer
 	database     *service.Database
 	audioDir     string
+	ragService   *service.RAGService
 }
 
 // NewKnowledgeHandler 创建知识库处理器
@@ -31,7 +32,13 @@ func NewKnowledgeHandler(
 		organizer:  organizer,
 		database:   database,
 		audioDir:   audioDir,
+		ragService: nil,
 	}
+}
+
+// SetRAGService 设置 RAG 服务
+func (h *KnowledgeHandler) SetRAGService(ragService *service.RAGService) {
+	h.ragService = ragService
 }
 
 // RecordRequest 语音记录请求
@@ -152,9 +159,45 @@ func (h *KnowledgeHandler) HandleRecord(c *gin.Context) {
 		Metadata:  make(map[string]string),
 	}
 
-	// AI 自动整理
+	// 如果提供了 session_id，生成会话标题和摘要
+	var sessionForSummary *service.Session = nil
+	if req.SessionID != "" {
+		session, err := h.database.GetSession(req.SessionID)
+		if err != nil {
+			fmt.Printf("获取会话失败: %v\n", err)
+		} else if session != nil && len(session.Messages) > 0 {
+			sessionForSummary = session
+			// 使用 AI 生成标题
+			title, err := h.organizer.GenerateTitleFromSession(session)
+			if err != nil {
+				fmt.Printf("AI 生成标题失败: %v\n", err)
+				// 失败时使用默认标题
+				knowledge.Title = "会话记录 - " + time.Now().Format("2006-01-02 15:04")
+			} else {
+				knowledge.Title = title
+			}
+		}
+	}
+
+	// AI 自动整理（如果有 session 则使用完整对话，否则只用输入文本）
 	if req.AutoOrganize {
-		organizeResult, err := h.organizer.Organize(text)
+		var organizeText string
+		if sessionForSummary != nil {
+			// 构建完整对话内容用于摘要生成
+			var conversationText string
+			for i, msg := range sessionForSummary.Messages {
+				role := "用户"
+				if msg.Role == "assistant" {
+					role = "AI助手"
+				}
+				conversationText += fmt.Sprintf("%d. %s: %s\n", i+1, role, msg.Content)
+			}
+			organizeText = conversationText
+		} else {
+			organizeText = text
+		}
+
+		organizeResult, err := h.organizer.Organize(organizeText)
 		if err != nil {
 			// 整理失败不影响存储，只记录日志
 			fmt.Printf("AI 整理警告: %v\n", err)
@@ -173,6 +216,24 @@ func (h *KnowledgeHandler) HandleRecord(c *gin.Context) {
 			Error:   "保存知识库失败: " + err.Error(),
 		})
 		return
+	}
+
+	// 同步到 RAG 向量库
+	if h.ragService != nil && knowledge.Content != "" {
+		metadata := map[string]interface{}{
+			"category":   knowledge.Category,
+			"tags":       knowledge.Tags,
+			"summary":    knowledge.Summary,
+			"key_points": knowledge.KeyPoints,
+			"source":     knowledge.Source,
+			"created_at": knowledge.CreatedAt,
+		}
+		if err := h.ragService.AddKnowledge(knowledge.ID, knowledge.Content, metadata); err != nil {
+			// 向量化失败不影响主流程，只记录日志
+			fmt.Printf("⚠️  RAG 向量化失败: %v\n", err)
+		} else {
+			fmt.Printf("✅ 知识 %s 已添加到向量库\n", knowledge.ID)
+		}
 	}
 
 	c.JSON(200, RecordResponse{

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -58,6 +59,7 @@ func (d *Database) initTables() error {
 		// 知识库表
 		`CREATE TABLE IF NOT EXISTS knowledge (
 			id TEXT PRIMARY KEY,
+			title TEXT,
 			content TEXT,
 			summary TEXT,
 			key_points TEXT,
@@ -72,6 +74,9 @@ func (d *Database) initTables() error {
 			FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
 		)`,
 
+		// 添加 title 字段（如果表已存在但没有该字段）
+		`ALTER TABLE knowledge ADD COLUMN title TEXT`,
+
 		// 索引
 		`CREATE INDEX IF NOT EXISTS idx_knowledge_category ON knowledge(category)`,
 		`CREATE INDEX IF NOT EXISTS idx_knowledge_session_id ON knowledge(session_id)`,
@@ -80,7 +85,10 @@ func (d *Database) initTables() error {
 
 	for _, schema := range schemas {
 		if _, err := d.db.Exec(schema); err != nil {
-			return fmt.Errorf("创建表失败: %w", err)
+			// 忽略 "duplicate column name" 错误（列已存在）
+			if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+				return fmt.Errorf("创建表失败: %w", err)
+			}
 		}
 	}
 
@@ -176,14 +184,15 @@ func (d *Database) SaveKnowledge(knowledge *Knowledge) error {
 	metadataJSON, _ := json.Marshal(knowledge.Metadata)
 
 	query := `INSERT OR REPLACE INTO knowledge
-			  (id, content, summary, key_points, category, tags, source, audio_url, session_id, created_at, updated_at, metadata)
-			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			  (id, title, content, summary, key_points, category, tags, source, audio_url, session_id, created_at, updated_at, metadata)
+			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	createdAt := knowledge.CreatedAt.Unix()
 	updatedAt := knowledge.UpdatedAt.Unix()
 
 	_, err := d.db.Exec(query,
 		knowledge.ID,
+		knowledge.Title,
 		knowledge.Content,
 		knowledge.Summary,
 		string(keyPointsJSON),
@@ -202,7 +211,7 @@ func (d *Database) SaveKnowledge(knowledge *Knowledge) error {
 
 // GetAllKnowledge 获取所有知识
 func (d *Database) GetAllKnowledge() ([]Knowledge, error) {
-	query := `SELECT id, content, summary, key_points, category, tags, source, audio_url, session_id, created_at, updated_at, metadata
+	query := `SELECT id, COALESCE(title, '') as title, content, summary, key_points, category, tags, source, audio_url, session_id, created_at, updated_at, metadata
 			  FROM knowledge ORDER BY created_at DESC`
 
 	rows, err := d.db.Query(query)
@@ -219,6 +228,7 @@ func (d *Database) GetAllKnowledge() ([]Knowledge, error) {
 
 		err := rows.Scan(
 			&k.ID,
+			&k.Title,
 			&k.Content,
 			&k.Summary,
 			&keyPointsJSON,
@@ -250,7 +260,7 @@ func (d *Database) GetAllKnowledge() ([]Knowledge, error) {
 
 // GetKnowledgeByCategory 按分类获取知识
 func (d *Database) GetKnowledgeByCategory(category string) ([]Knowledge, error) {
-	query := `SELECT id, content, summary, key_points, category, tags, source, audio_url, session_id, created_at, updated_at, metadata
+	query := `SELECT id, COALESCE(title, '') as title, content, summary, key_points, category, tags, source, audio_url, session_id, created_at, updated_at, metadata
 			  FROM knowledge WHERE category = ? ORDER BY created_at DESC`
 
 	rows, err := d.db.Query(query, category)
@@ -267,6 +277,7 @@ func (d *Database) GetKnowledgeByCategory(category string) ([]Knowledge, error) 
 
 		err := rows.Scan(
 			&k.ID,
+			&k.Title,
 			&k.Content,
 			&k.Summary,
 			&keyPointsJSON,
@@ -298,7 +309,7 @@ func (d *Database) GetKnowledgeByCategory(category string) ([]Knowledge, error) 
 
 // SearchKnowledge 搜索知识
 func (d *Database) SearchKnowledge(searchQuery string) ([]Knowledge, error) {
-	query := `SELECT id, content, summary, key_points, category, tags, source, audio_url, session_id, created_at, updated_at, metadata
+	query := `SELECT id, COALESCE(title, '') as title, content, summary, key_points, category, tags, source, audio_url, session_id, created_at, updated_at, metadata
 			  FROM knowledge
 			  WHERE content LIKE ? OR summary LIKE ? OR category LIKE ?
 			  ORDER BY created_at DESC`
@@ -319,6 +330,7 @@ func (d *Database) SearchKnowledge(searchQuery string) ([]Knowledge, error) {
 
 		err := rows.Scan(
 			&k.ID,
+			&k.Title,
 			&k.Content,
 			&k.Summary,
 			&keyPointsJSON,

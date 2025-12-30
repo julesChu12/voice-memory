@@ -206,8 +206,8 @@
     </div>
 
     <script>
-        // 配置
-        const API_BASE_URL = 'http://localhost:8080';
+        // 配置 - 使用相对路径（前后端同域）
+        const API_BASE_URL = '';  // 空字符串表示相对路径，自动使用当前域名
         const SAMPLE_RATE = 16000;  // 百度要求 16kHz
 
         // Initialize icons
@@ -521,8 +521,20 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    alert(`✅ 保存成功！\n\n分类: ${result.knowledge.category}\n摘要: ${result.knowledge.summary}`);
-                    await loadKnowledgeList();  // 刷新知识库列表
+                    const titleText = result.knowledge.title ? `\n标题: ${result.knowledge.title}` : '';
+                    alert(`✅ 保存成功！\n\n${titleText}\n分类: ${result.knowledge.category}\n摘要: ${result.knowledge.summary}`);
+
+                    // 保存成功后开启新会话
+                    sessionId = '';
+                    lastAiReply = '';
+                    lastRecognizedText = '';
+                    transcript.value = '';
+                    aiReply.innerHTML = '<span class="text-slate-600 italic">AI 回复将显示在这里...</span>';
+
+                    // 刷新列表
+                    await loadKnowledgeList();
+                    await loadSessionsList();
+                    updateInputState();
                 } else {
                     throw new Error(result.error || '保存失败');
                 }
@@ -552,6 +564,7 @@
                             <div class="item-header p-3 cursor-pointer hover:bg-slate-700/30 transition-colors" onclick="toggleConversation('${k.id}', '${k.session_id || ''}', this)">
                                 <div class="flex items-start justify-between gap-2">
                                     <div class="flex-1 min-w-0">
+                                        ${k.title ? `<h3 class="text-base font-medium text-white mb-2 flex items-center gap-2"><i data-lucide="bookmark" class="w-4 h-4 text-blue-400"></i>${k.title}</h3>` : ''}
                                         <div class="flex items-center gap-2 mb-1">
                                             <span class="px-2 py-0.5 text-xs rounded-full bg-blue-500/20 text-blue-300">${k.category}</span>
                                             <span class="text-xs text-slate-500">${new Date(k.created_at).toLocaleString()}</span>
@@ -768,7 +781,8 @@
         transcript.addEventListener('keydown', (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                 e.preventDefault();
-                if (!sendBtn.disabled) {
+                // 检查是否处于发送状态（输入框或其他控件被禁用）
+                if (!sendBtn.disabled && !transcript.disabled) {
                     sendBtn.click();
                 }
             }
@@ -789,16 +803,8 @@
             // 使用编辑后的文本
             const text = lastRecognizedText.trim();
             if (text) {
-                // 显示加载状态
-                aiReply.innerHTML = `<span class="text-yellow-400 flex items-center gap-2">
-                    <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    正在思考...
-                </span>`;
-                sendBtn.disabled = true;
-                playVoiceBtn.disabled = true;
+                // 显示加载状态并禁用所有输入控件
+                setSendingState(true);
 
                 try {
                     // 使用 SSE 流式响应
@@ -806,13 +812,33 @@
                 } catch (error) {
                     console.error('发送消息失败:', error);
                     aiReply.innerHTML = `<span class="text-red-400">错误: ${error.message}</span>`;
-                    sendBtn.disabled = false;
-                    playVoiceBtn.disabled = false;
+                    setSendingState(false);
                 }
             } else {
                 alert('请先录制或输入一些文字');
             }
         });
+
+        // 设置发送状态（禁用/启用所有输入控件）
+        function setSendingState(isSending) {
+            sendBtn.disabled = isSending;
+            playVoiceBtn.disabled = isSending;
+            transcript.disabled = isSending;
+            clearInputBtn.disabled = isSending;
+
+            if (isSending) {
+                transcript.classList.add('opacity-50');
+                aiReply.innerHTML = `<span class="text-yellow-400 flex items-center gap-2">
+                    <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    正在思考...
+                </span>`;
+            } else {
+                transcript.classList.remove('opacity-50');
+            }
+        }
 
         // ===== SSE 流式聊天 =====
         async function sendChatWithSSE(text) {
@@ -864,8 +890,8 @@
                                 console.log('流式响应完成');
                                 sessionId = data.session_id;
                                 lastAiReply = fullReply;
-                                sendBtn.disabled = false;
-                                playVoiceBtn.disabled = false;
+                                // 恢复输入状态
+                                setSendingState(false);
 
                                 // 清除旧的 TTS 缓存
                                 cachedTTSUrl = null;

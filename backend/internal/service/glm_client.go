@@ -1,12 +1,14 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -259,4 +261,119 @@ func (g *GLMClient) SendMessageWithAudio(audioData []byte, messages []Message) (
 	}
 
 	return &response, nil
+}
+
+// StreamChunk 流式响应数据块
+type StreamChunk struct {
+	Delta    string `json:"delta"`
+	Done     bool   `json:"done"`
+	Error    string `json:"error,omitempty"`
+}
+
+// GLMStreamEvent GLM 流式事件
+type GLMStreamEvent struct {
+	Type  string      `json:"type"`
+	Index int         `json:"index,omitempty"`
+	Delta *GLMDelta   `json:"delta,omitempty"`
+}
+
+// GLMDelta GLM 增量内容
+type GLMDelta struct {
+	Type        string `json:"type"`
+	Text        string `json:"text,omitempty"`
+	StopReason  string `json:"stop_reason,omitempty"`
+}
+
+// SendMessageStream 发送消息（流式）
+func (g *GLMClient) SendMessageStream(req ChatRequest, callback func(StreamChunk)) error {
+	req.Stream = true
+
+	jsonData, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("构建请求失败: %w", err)
+	}
+
+	httpReq, err := http.NewRequest("POST", g.baseURL+"/v1/messages", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	// 设置请求头
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+g.apiKey)
+	httpReq.Header.Set("HTTP-Referer", "https://voice-memory.app")
+	httpReq.Header.Set("X-Title", "Voice Memory")
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	resp, err := g.client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API 错误 [%d]: %s", resp.StatusCode, string(body))
+	}
+
+	// 读取流式响应
+	scanner := bufio.NewScanner(resp.Body)
+	lineCount := 0
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		lineCount++
+
+		// 跳过空行
+		if line == "" {
+			continue
+		}
+
+		// 只处理 data: 行，忽略 event: 行
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		// 移除 "data: " 前缀
+		data := strings.TrimPrefix(line, "data: ")
+		data = strings.TrimSpace(data)
+
+		// 结束标记
+		if data == "[DONE]" {
+			callback(StreamChunk{Done: true})
+			break
+		}
+
+		// 尝试解析 JSON
+		var event GLMStreamEvent
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			continue
+		}
+
+		// 处理不同类型的事件
+		if event.Type == "content_block_delta" && event.Delta != nil && event.Delta.Type == "text_delta" {
+			// 文本增量
+			if event.Delta.Text != "" {
+				callback(StreamChunk{Delta: event.Delta.Text})
+			}
+		} else if event.Type == "message_delta" && event.Delta != nil && event.Delta.StopReason != "" {
+			// 消息结束
+			callback(StreamChunk{Done: true})
+			break
+		} else if event.Type == "message_stop" {
+			// 消息停止
+			callback(StreamChunk{Done: true})
+			break
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("读取流失败: %w", err)
+	}
+
+	// 如果没有收到任何数据，调用完成
+	if lineCount == 0 {
+		callback(StreamChunk{Done: true})
+	}
+
+	return nil
 }

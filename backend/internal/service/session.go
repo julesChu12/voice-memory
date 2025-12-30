@@ -11,10 +11,11 @@ import (
 
 // Session 对话会话
 type Session struct {
-	ID        string    `json:"id"`
-	Messages  []Message `json:"messages"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        string         `json:"id"`
+	Messages  []Message      `json:"messages"`
+	Summary   *SessionSummary `json:"summary,omitempty"`   // 会话摘要
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 }
 
 // SessionData 会话数据（用于存储）
@@ -233,6 +234,32 @@ func (sm *SessionManager) GetSessionCount() int {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return len(sm.sessions)
+}
+
+// UpdateSummary 更新会话摘要
+func (sm *SessionManager) UpdateSummary(sessionID string, summary *SessionSummary) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if session, exists := sm.sessions[sessionID]; exists {
+		session.Summary = summary
+		session.UpdatedAt = time.Now()
+		fmt.Printf("更新会话摘要: %s (消息数: %d)\n", sessionID, summary.MessageCount)
+
+		// 自动保存
+		sm.saveUnsafe()
+	}
+}
+
+// GetSummary 获取会话摘要
+func (sm *SessionManager) GetSummary(sessionID string) *SessionSummary {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if session, exists := sm.sessions[sessionID]; exists {
+		return session.Summary
+	}
+	return nil
 }
 
 // saveUnsafe 不加锁的保存（内部使用）
