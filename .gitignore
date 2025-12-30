@@ -7,6 +7,11 @@
 *.test
 *.out
 
+# Go binaries in backend
+backend/migrate
+backend/voice-memory
+backend/voice-memory-backend
+
 # Go workspace file
 go.work
 go.work.sum
