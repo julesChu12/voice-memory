@@ -1,0 +1,52 @@
+# Binaries
+server
+migrate_titles
+restore_fenjiu
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Data directory (user data)
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Audio files
+audio/
+*.wav
+*.mp3
+
+# Logs
+*.log
+/tmp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude
+claudedocs/
