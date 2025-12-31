@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice Memory - 语音知识库</title>
+    <title>Voice Memory - 可打断语音助手</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
@@ -21,1055 +21,274 @@
         .recording-indicator {
             animation: recording 1s ease-in-out infinite;
         }
+        /* 说话时的波纹效果 */
+        .speaking-wave {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            height: 20px;
+        }
+        .speaking-wave span {
+            display: block;
+            width: 4px;
+            height: 100%;
+            background: #a855f7;
+            border-radius: 2px;
+            animation: wave 1s ease-in-out infinite;
+        }
+        .speaking-wave span:nth-child(2) { animation-delay: 0.1s; }
+        .speaking-wave span:nth-child(3) { animation-delay: 0.2s; }
+        .speaking-wave span:nth-child(4) { animation-delay: 0.3s; }
+        .speaking-wave span:nth-child(5) { animation-delay: 0.4s; }
+        @keyframes wave {
+            0%, 100% { height: 20%; }
+            50% { height: 100%; }
+        }
     </style>
 </head>
-<body class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 min-h-screen text-white">
-    <div class="container mx-auto px-4 py-8 max-w-2xl">
+<body class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 min-h-screen text-white font-sans">
+    <div class="container mx-auto px-4 py-8 max-w-xl h-screen flex flex-col">
 
         <!-- Header -->
-        <header class="text-center mb-8">
-            <h1 class="text-4xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-                🎤 Voice Memory
+        <header class="text-center mb-6 flex-shrink-0">
+            <h1 class="text-3xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                Voice Memory
             </h1>
-            <p class="text-slate-400">语音记录 → AI 整理 → 知识库 (百度 STT + 智谱 GLM)</p>
+            <p class="text-slate-400 text-sm">Real-time • Barge-in • Local Memory</p>
         </header>
 
-        <!-- Main Card -->
-        <main class="bg-slate-800/50 backdrop-blur rounded-2xl shadow-2xl border border-slate-700 p-8">
-
-            <!-- Record Button -->
-            <div class="flex justify-center mb-8">
-                <button id="recordBtn" class="group relative">
-                    <div id="pulseRing" class="absolute inset-0 bg-gradient-to-r from-red-500 to-orange-500 rounded-full blur-xl opacity-0"></div>
-                    <div class="relative bg-gradient-to-r from-blue-500 to-purple-500 rounded-full p-8 transition-transform group-hover:scale-105">
-                        <i data-lucide="mic" class="w-12 h-12 text-white"></i>
-                    </div>
-                </button>
-            </div>
-
-            <!-- Status -->
-            <div class="text-center mb-8">
-                <div id="status" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-700/50 text-slate-300">
-                    <span class="w-2 h-2 rounded-full bg-slate-500" id="statusDot"></span>
-                    <span id="statusText">点击麦克风开始录音</span>
-                </div>
-                <div id="recordingTime" class="text-2xl font-mono mt-2 hidden">00:00</div>
-            </div>
-
-            <!-- Transcript Display -->
-            <div class="mb-4">
-                <label class="block text-sm font-medium text-slate-400 mb-2">
-                    输入内容 (Ctrl+Enter 发送)
-                </label>
-                <textarea id="transcript" class="min-h-[100px] w-full p-4 bg-slate-900/50 rounded-xl border border-slate-700 text-white text-sm resize-none focus:outline-none focus:border-blue-500" placeholder="录音识别或直接输入文字..."></textarea>
-                <div class="flex items-center justify-between mt-2">
-                    <span class="text-xs text-slate-500">
-                        <span id="charCount">0</span> 字符
-                    </span>
-                    <button id="clearInputBtn" class="flex items-center gap-1 px-2 py-1 text-xs bg-slate-700 text-slate-300 rounded hover:bg-slate-600 transition-colors">
-                        <i data-lucide="x" class="w-3 h-3"></i>
-                        清空
-                    </button>
-                </div>
-            </div>
-
-            <!-- AI Reply Display -->
-            <div class="mb-6">
-                <div class="flex items-center justify-between mb-2">
-                    <label class="block text-sm font-medium text-slate-400">
-                        AI 回复
-                    </label>
-                    <button id="playVoiceBtn" class="flex items-center gap-1 px-3 py-1 text-xs bg-purple-500/20 text-purple-300 rounded-lg hover:bg-purple-500/30 transition-colors disabled:opacity-50" disabled>
-                        <i data-lucide="volume-2" class="w-3 h-3"></i>
-                        播放语音
-                    </button>
-                </div>
-                <div id="aiReply" class="min-h-[100px] p-4 bg-slate-900/50 rounded-xl border border-slate-700 text-slate-300">
-                    <span class="text-slate-600 italic">AI 回复将显示在这里...</span>
-                </div>
-            </div>
-
-            <!-- Action Buttons -->
-            <div class="grid grid-cols-3 gap-4">
-                <button id="sendBtn" class="py-3 px-4 bg-gradient-to-r from-green-500 to-emerald-500 rounded-xl font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed text-sm" disabled>
-                    <span class="flex items-center justify-center gap-2">
-                        <i data-lucide="message-circle" class="w-4 h-4"></i>
-                        AI 对话
-                    </span>
-                </button>
-                <button id="saveKnowledgeBtn" class="py-3 px-4 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-xl font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed text-sm" disabled>
-                    <span class="flex items-center justify-center gap-2">
-                        <i data-lucide="database" class="w-4 h-4"></i>
-                        保存知识
-                    </span>
-                </button>
-                <button id="clearBtn" class="py-3 px-4 bg-slate-700 rounded-xl font-medium hover:bg-slate-600 transition-colors text-sm">
-                    <span class="flex items-center justify-center gap-2">
-                        <i data-lucide="trash-2" class="w-4 h-4"></i>
-                        清除
-                    </span>
-                </button>
-            </div>
-
-            <!-- Knowledge List -->
-            <div class="mt-6">
-                <div class="flex items-center justify-between mb-2">
-                    <label class="block text-sm font-medium text-slate-400">
-                        我的知识库
-                    </label>
-                    <button id="refreshKnowledgeBtn" class="flex items-center gap-1 px-2 py-1 text-xs bg-slate-700 text-slate-300 rounded hover:bg-slate-600 transition-colors">
-                        <i data-lucide="refresh-cw" class="w-3 h-3"></i>
-                        刷新
-                    </button>
-                </div>
-                <div id="knowledgeList" class="min-h-[150px] max-h-[300px] overflow-y-auto p-4 bg-slate-900/50 rounded-xl border border-slate-700 text-slate-300 space-y-2">
-                    <span class="text-slate-600 italic text-sm">知识库内容将显示在这里...</span>
-                </div>
-            </div>
-
-            <!-- All Sessions List -->
-            <div class="mt-6">
-                <div class="flex items-center justify-between mb-2">
-                    <label class="block text-sm font-medium text-slate-400">
-                        💬 所有对话记录
-                    </label>
-                    <button id="refreshSessionsBtn" class="flex items-center gap-1 px-2 py-1 text-xs bg-slate-700 text-slate-300 rounded hover:bg-slate-600 transition-colors">
-                        <i data-lucide="refresh-cw" class="w-3 h-3"></i>
-                        刷新
-                    </button>
-                </div>
-                <div id="sessionsList" class="min-h-[150px] max-h-[400px] overflow-y-auto p-4 bg-slate-900/50 rounded-xl border border-slate-700 text-slate-300 space-y-2">
-                    <span class="text-slate-600 italic text-sm">对话记录将显示在这里...</span>
-                </div>
-            </div>
-
-            <!-- Debug Info -->
-            <details class="mt-6">
-                <summary class="cursor-pointer text-sm text-slate-400 hover:text-slate-300">
-                    🛠️ 调试信息
-                </summary>
-                <div class="mt-3 bg-slate-900/80 rounded-xl p-4 border border-slate-700 text-sm">
-                    <div class="grid grid-cols-2 gap-2 mb-3">
-                        <div>
-                            <span class="text-slate-500">后端状态:</span>
-                            <span id="backendStatus" class="ml-2 text-yellow-400">检测中...</span>
-                        </div>
-                        <div>
-                            <span class="text-slate-500">录音时长:</span>
-                            <span id="recordDuration" class="ml-2">0s</span>
-                        </div>
-                        <div>
-                            <span class="text-slate-500">音频大小:</span>
-                            <span id="audioSize" class="ml-2">0 KB</span>
-                        </div>
-                        <div>
-                            <span class="text-slate-500">音频格式:</span>
-                            <span id="audioFormat" class="ml-2">WAV/PCM</span>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="text-slate-500 block mb-1">选择麦克风:</label>
-                        <select id="micSelect" class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white text-sm">
-                            <option value="">检测麦克风设备...</option>
-                        </select>
-                    </div>
-                </div>
-            </details>
-
-            <!-- Info -->
-            <div class="mt-6 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
-                <div class="flex items-start gap-3">
-                    <i data-lucide="database" class="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0"></i>
-                    <div class="text-sm text-blue-300">
-                        <p class="font-medium mb-1">语音知识库 MVP</p>
-                        <ul class="space-y-1 text-blue-300/80">
-                            <li>• 语音录制 → STT 识别</li>
-                            <li>• AI 自动分类和提取关键点</li>
-                            <li>• 保存到个人知识库</li>
-                            <li>• 知识列表和统计</li>
-                            <li>• 支持 AI 对话模式</li>
-                        </ul>
+        <!-- Chat Area (Scrollable) -->
+        <main class="flex-1 overflow-y-auto bg-slate-800/30 backdrop-blur rounded-2xl border border-slate-700/50 p-4 mb-6 relative custom-scrollbar" id="chatArea">
+            <div class="space-y-4" id="messages">
+                <!-- Welcome Message -->
+                <div class="flex justify-start">
+                    <div class="max-w-[85%] p-3 rounded-2xl rounded-tl-none bg-slate-700/80 text-slate-200 text-sm shadow-sm">
+                        👋 你好！我是 Voice Memory。
+                        <br>点击下方麦克风，我们可以直接对话。
+                        <br>支持随时打断哦！
                     </div>
                 </div>
             </div>
-
+            
+            <!-- Real-time Status Indicator (Floating) -->
+            <div id="statusIndicator" class="hidden absolute bottom-4 left-1/2 transform -translate-x-1/2 px-4 py-2 bg-slate-900/90 border border-slate-600 rounded-full shadow-xl flex items-center gap-3 z-10 transition-all duration-300">
+                <!-- Content injected by JS -->
+            </div>
         </main>
 
-        <!-- Audio Player (隐藏) -->
-        <audio id="audioPlayer" style="display:none;"></audio>
+        <!-- Controls Area -->
+        <div class="flex-shrink-0 mb-4">
+            
+            <!-- Transcript Preview (Real-time) -->
+            <div id="transcriptPreview" class="h-12 mb-4 text-center text-slate-400 text-sm px-4 truncate transition-opacity opacity-0">
+                ...
+            </div>
 
-        <!-- Footer -->
-        <footer class="text-center mt-8 text-slate-500 text-sm">
-            Voice Memory • 语音输入 → AI 整理 → 知识沉淀
-        </footer>
+            <!-- Main Mic Button -->
+            <div class="flex justify-center items-center relative">
+                <!-- Pulse Ring (Active when recording) -->
+                <div id="pulseRing" class="absolute inset-0 bg-gradient-to-r from-red-500/50 to-orange-500/50 rounded-full blur-xl opacity-0 transform scale-75 transition-all duration-300"></div>
+                
+                <button id="recordBtn" class="relative z-10 w-20 h-20 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full shadow-lg flex items-center justify-center transition-transform hover:scale-105 active:scale-95 group border-4 border-slate-800">
+                    <i data-lucide="mic" class="w-8 h-8 text-white group-hover:text-white transition-colors" id="micIcon"></i>
+                </button>
+
+                <!-- Interrupt Button (Visible when speaking) -->
+                <button id="interruptBtn" class="absolute right-10 top-1/2 -translate-y-1/2 hidden px-4 py-2 bg-red-500/20 text-red-400 border border-red-500/50 rounded-full text-xs font-medium hover:bg-red-500/30 transition-colors">
+                    ✋ 打断
+                </button>
+            </div>
+
+            <div class="text-center mt-4">
+                <p id="connectionStatus" class="text-xs text-slate-600">
+                    <span class="w-2 h-2 inline-block rounded-full bg-slate-500 mr-1" id="connDot"></span>
+                    <span id="connText">未连接</span>
+                </p>
+            </div>
+        </div>
 
     </div>
 
-    <script>
-        // 配置 - 使用相对路径（前后端同域）
-        const API_BASE_URL = '';  // 空字符串表示相对路径，自动使用当前域名
-        const SAMPLE_RATE = 16000;  // 百度要求 16kHz
+    <!-- Hidden Audio Player -->
+    <audio id="audioPlayer" style="display:none;"></audio>
 
-        // Initialize icons
+    <!-- Load Scripts -->
+    <script src="ws-client.js"></script>
+    <script>
         lucide.createIcons();
 
-        // DOM 元素
+        // DOM Elements
         const recordBtn = document.getElementById('recordBtn');
-        const statusDot = document.getElementById('statusDot');
-        const statusText = document.getElementById('statusText');
-        const transcript = document.getElementById('transcript');
-        const charCount = document.getElementById('charCount');
-        const clearInputBtn = document.getElementById('clearInputBtn');
-        const aiReply = document.getElementById('aiReply');
-        const sendBtn = document.getElementById('sendBtn');
-        const saveKnowledgeBtn = document.getElementById('saveKnowledgeBtn');
-        const clearBtn = document.getElementById('clearBtn');
-        const playVoiceBtn = document.getElementById('playVoiceBtn');
+        const interruptBtn = document.getElementById('interruptBtn');
+        const messagesDiv = document.getElementById('messages');
+        const chatArea = document.getElementById('chatArea');
+        const transcriptPreview = document.getElementById('transcriptPreview');
+        const statusIndicator = document.getElementById('statusIndicator');
         const pulseRing = document.getElementById('pulseRing');
-        const recordingTime = document.getElementById('recordingTime');
-        const micSelect = document.getElementById('micSelect');
-        const backendStatus = document.getElementById('backendStatus');
-        const recordDuration = document.getElementById('recordDuration');
-        const audioSize = document.getElementById('audioSize');
-        const knowledgeList = document.getElementById('knowledgeList');
-        const refreshKnowledgeBtn = document.getElementById('refreshKnowledgeBtn');
-        const sessionsList = document.getElementById('sessionsList');
-        const refreshSessionsBtn = document.getElementById('refreshSessionsBtn');
-        const audioPlayer = document.getElementById('audioPlayer');
+        const connDot = document.getElementById('connDot');
+        const connText = document.getElementById('connText');
+        const micIcon = document.getElementById('micIcon');
 
-        // 状态变量
-        let isRecording = false;
-        let audioContext = null;
-        let mediaStream = null;
-        let processor = null;
-        let audioChunks = [];
-        let recordingStartTime = null;
-        let recordingTimer = null;
-        let selectedDeviceId = null;
-        let sessionId = null;  // 会话 ID，用于多轮对话
-        let lastAiReply = '';  // 最近的 AI 回复，用于 TTS 播放
-        let lastAudioBlob = null;  // 保存最近的音频 blob，用于知识库记录
-        let lastRecognizedText = '';  // 保存最近的识别文本
+        // State
+        let client = null;
+        let currentAiMessageDiv = null;
 
-        // ===== WAV 编码器 =====
-        function encodeWAV(samples, sampleRate) {
-            const buffer = new ArrayBuffer(44 + samples.length * 2);
-            const view = new DataView(buffer);
-
-            // RIFF 标识
-            writeString(view, 0, 'RIFF');
-            view.setUint32(4, 36 + samples.length * 2, true);
-            writeString(view, 8, 'WAVE');
-
-            // fmt 子块
-            writeString(view, 12, 'fmt ');
-            view.setUint32(16, 16, true);  // fmt 块大小
-            view.setUint16(20, 1, true);   // PCM 格式
-            view.setUint16(22, 1, true);   // 单声道
-            view.setUint32(24, sampleRate, true);  // 采样率
-            view.setUint32(28, sampleRate * 2, true);  // 字节率
-            view.setUint16(32, 2, true);   // 块对齐
-            view.setUint16(34, 16, true);  // 位深度
-
-            // data 子块
-            writeString(view, 36, 'data');
-            view.setUint32(40, samples.length * 2, true);
-
-            // 写入 PCM 数据
-            floatTo16BitPCM(view, 44, samples);
-
-            return new Blob([view], { type: 'audio/wav' });
+        // Helper: Scroll to bottom
+        function scrollToBottom() {
+            chatArea.scrollTop = chatArea.scrollHeight;
         }
 
-        function writeString(view, offset, string) {
-            for (let i = 0; i < string.length; i++) {
-                view.setUint8(offset + i, string.charCodeAt(i));
-            }
+        // Helper: Create Message Bubble
+        function appendMessage(role, text) {
+            const div = document.createElement('div');
+            div.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+            
+            const bubble = document.createElement('div');
+            bubble.className = `max-w-[85%] p-3 rounded-2xl text-sm shadow-sm ${
+                role === 'user' 
+                ? 'rounded-tr-none bg-blue-600 text-white' 
+                : 'rounded-tl-none bg-slate-700/80 text-slate-200'
+            }`;
+            bubble.textContent = text;
+            
+            div.appendChild(bubble);
+            messagesDiv.appendChild(div);
+            scrollToBottom();
+            return bubble; // Return for updating
         }
 
-        function floatTo16BitPCM(view, offset, samples) {
-            for (let i = 0; i < samples.length; i++, offset += 2) {
-                const s = Math.max(-1, Math.min(1, samples[i]));
-                view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-            }
-        }
-
-        // ===== 检查后端状态 =====
-        async function checkBackend() {
-            try {
-                const resp = await fetch(`${API_BASE_URL}/health`);
-                if (resp.ok) {
-                    backendStatus.textContent = '✅ 在线';
-                    backendStatus.className = 'ml-2 text-green-400';
-                    return true;
-                }
-            } catch (e) {
-                backendStatus.textContent = '❌ 离线';
-                backendStatus.className = 'ml-2 text-red-400';
-                return false;
-            }
-        }
-
-        // ===== 枚举麦克风设备 =====
-        async function enumerateMicrophones() {
-            try {
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const audioInputs = devices.filter(d => d.kind === 'audioinput');
-
-                micSelect.innerHTML = '';
-                audioInputs.forEach((device, index) => {
-                    const option = document.createElement('option');
-                    option.value = device.deviceId;
-                    option.textContent = device.label || `麦克风 ${index + 1}`;
-                    micSelect.appendChild(option);
-                });
-
-                console.log(`找到 ${audioInputs.length} 个麦克风设备`);
-            } catch (error) {
-                console.error('枚举设备失败:', error);
-            }
-        }
-
-        // ===== 开始录音 =====
-        async function startRecording() {
-            try {
-                const constraints = {
-                    audio: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true
-                };
-
-                mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-
-                // 创建 AudioContext
-                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
-                const source = audioContext.createMediaStreamSource(mediaStream);
-                processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-                audioChunks = [];
-
-                processor.onaudioprocess = (e) => {
-                    if (isRecording) {
-                        const inputData = e.inputBuffer.getChannelData(0);
-                        audioChunks.push(new Float32Array(inputData));
-                    }
-                };
-
-                source.connect(processor);
-                processor.connect(audioContext.destination);
-
-                recordingStartTime = Date.now();
-
-                // 更新 UI
-                isRecording = true;
-                statusDot.className = 'w-2 h-2 rounded-full bg-red-500 recording-indicator';
-                statusText.textContent = '正在录音... (再次点击停止)';
-                pulseRing.classList.add('pulse-ring');
-                recordingTime.classList.remove('hidden');
-
-                // 启动计时器
-                recordingTimer = setInterval(updateRecordingTime, 100);
-
-            } catch (error) {
-                console.error('录音失败:', error);
-                alert('录音失败: ' + error.message);
-            }
-        }
-
-        // ===== 停止录音 =====
-        function stopRecording() {
-            if (!audioContext) return;
-
-            // 断开连接
-            if (processor) {
-                processor.disconnect();
-            }
-
-            // 停止音频流
-            if (mediaStream) {
-                mediaStream.getTracks().forEach(track => track.stop());
-            }
-
-            // 关闭 AudioContext
-            audioContext.close();
-
-            // 停止计时器
-            if (recordingTimer) {
-                clearInterval(recordingTimer);
-                recordingTimer = null;
-            }
-
-            // 更新 UI
-            isRecording = false;
-            statusDot.className = 'w-2 h-2 rounded-full bg-yellow-500 animate-pulse';
-            statusText.textContent = '正在识别...';
-            pulseRing.classList.remove('pulse-ring');
-
-            // 合并音频数据并编码为 WAV
-            const totalLength = audioChunks.reduce((sum, chunk) => sum + chunk.length, 0);
-            const samples = new Float32Array(totalLength);
-            let offset = 0;
-            for (const chunk of audioChunks) {
-                samples.set(chunk, offset);
-                offset += chunk.length;
-            }
-
-            const wavBlob = encodeWAV(samples, SAMPLE_RATE);
-            audioSize.textContent = (wavBlob.size / 1024).toFixed(1) + ' KB';
-            console.log(`录音结束，大小: ${(wavBlob.size / 1024).toFixed(1)} KB`);
-
-            // 上传识别
-            uploadAndRecognize(wavBlob);
-        }
-
-        // ===== 更新录音时长 =====
-        function updateRecordingTime() {
-            const elapsed = Date.now() - recordingStartTime;
-            const seconds = Math.floor(elapsed / 1000);
-            const minutes = Math.floor(seconds / 60);
-            const secs = seconds % 60;
-
-            recordingTime.textContent =
-                String(minutes).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
-
-            recordDuration.textContent = seconds + 's';
-        }
-
-        // ===== 上传并识别 =====
-        async function uploadAndRecognize(audioBlob) {
-            try {
-                const formData = new FormData();
-                formData.append('audio', audioBlob, 'recording.wav');
-                formData.append('format', 'wav');
-
-                const response = await fetch(`${API_BASE_URL}/api/stt`, {
-                    method: 'POST',
-                    body: formData
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-
-                const result = await response.json();
-
-                if (result.success && result.result && result.result.length > 0) {
-                    const text = result.result[0];
-                    // 填充到输入框
-                    transcript.value = text;
-                    lastRecognizedText = text;
-                    lastAudioBlob = audioBlob;
-                    updateInputState();
-                    console.log('识别结果:', text);
-                } else {
-                    throw new Error(result.error || '识别失败');
-                }
-
-            } catch (error) {
-                console.error('识别失败:', error);
-                transcript.value = '识别失败: ' + error.message;
-                updateInputState();
-            } finally {
-                // 重置状态
-                statusDot.className = 'w-2 h-2 rounded-full bg-slate-500';
-                statusText.textContent = '点击麦克风开始录音';
-                recordingTime.classList.add('hidden');
-            }
-        }
-
-        // ===== 更新输入状态 =====
-        function updateInputState() {
-            const text = transcript.value.trim();
-            charCount.textContent = text.length;
-            lastRecognizedText = text;
-            sendBtn.disabled = text.length === 0;
-            saveKnowledgeBtn.disabled = text.length === 0;
-        }
-
-        // ===== 保存到知识库 =====
-        async function saveToKnowledge() {
-            if (!lastRecognizedText) {
-                alert('没有可保存的内容');
-                return;
-            }
-
-            saveKnowledgeBtn.disabled = true;
-            saveKnowledgeBtn.innerHTML = '<span class="flex items-center justify-center gap-2"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>保存中...</span>';
-            lucide.createIcons();
-
-            try {
-                const formData = new FormData();
-                // 如果有音频就传音频，同时传入编辑后的文本
-                if (lastAudioBlob) {
-                    formData.append('audio', lastAudioBlob, 'recording.wav');
-                }
-                // 传入编辑后的文本
-                formData.append('text', lastRecognizedText);
-                formData.append('auto_organize', 'true');
-                // 传入会话ID，关联完整的多轮对话历史
-                if (sessionId) {
-                    formData.append('session_id', sessionId);
-                }
-
-                const response = await fetch(`${API_BASE_URL}/api/knowledge/record`, {
-                    method: 'POST',
-                    body: formData
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-
-                const result = await response.json();
-
-                if (result.success) {
-                    const titleText = result.knowledge.title ? `\n标题: ${result.knowledge.title}` : '';
-                    alert(`✅ 保存成功！\n\n${titleText}\n分类: ${result.knowledge.category}\n摘要: ${result.knowledge.summary}`);
-
-                    // 保存成功后开启新会话
-                    sessionId = '';
-                    lastAiReply = '';
-                    lastRecognizedText = '';
-                    transcript.value = '';
-                    aiReply.innerHTML = '<span class="text-slate-600 italic">AI 回复将显示在这里...</span>';
-
-                    // 刷新列表
-                    await loadKnowledgeList();
-                    await loadSessionsList();
-                    updateInputState();
-                } else {
-                    throw new Error(result.error || '保存失败');
-                }
-
-            } catch (error) {
-                console.error('保存失败:', error);
-                alert('保存失败: ' + error.message);
-            } finally {
-                saveKnowledgeBtn.disabled = false;
-                saveKnowledgeBtn.innerHTML = '<span class="flex items-center justify-center gap-2"><i data-lucide="database" class="w-4 h-4"></i>保存知识</span>';
-                lucide.createIcons();
-            }
-        }
-
-        // ===== 加载知识库列表 =====
-        async function loadKnowledgeList() {
-            try {
-                const response = await fetch(`${API_BASE_URL}/api/knowledge/list`);
-                if (!response.ok) throw new Error('加载失败');
-
-                const result = await response.json();
-
-                if (result.success && result.knowledges && result.knowledges.length > 0) {
-                    knowledgeList.innerHTML = result.knowledges.map(k => `
-                        <div class="knowledge-item bg-slate-800/50 rounded-lg border border-slate-700/50 overflow-hidden" data-id="${k.id}" data-session="${k.session_id || ''}">
-                            <!-- 可点击的头部 -->
-                            <div class="item-header p-3 cursor-pointer hover:bg-slate-700/30 transition-colors" onclick="toggleConversation('${k.id}', '${k.session_id || ''}', this)">
-                                <div class="flex items-start justify-between gap-2">
-                                    <div class="flex-1 min-w-0">
-                                        ${k.title ? `<h3 class="text-base font-medium text-white mb-2 flex items-center gap-2"><i data-lucide="bookmark" class="w-4 h-4 text-blue-400"></i>${k.title}</h3>` : ''}
-                                        <div class="flex items-center gap-2 mb-1">
-                                            <span class="px-2 py-0.5 text-xs rounded-full bg-blue-500/20 text-blue-300">${k.category}</span>
-                                            <span class="text-xs text-slate-500">${new Date(k.created_at).toLocaleString()}</span>
-                                            ${k.session_id ? '<span class="px-2 py-0.5 text-xs rounded-full bg-green-500/20 text-green-300">💬 对话</span>' : ''}
-                                        </div>
-                                        <p class="text-sm text-slate-300 mb-1">${k.content}</p>
-                                        ${k.summary ? `<p class="text-xs text-slate-500 italic">摘要: ${k.summary}</p>` : ''}
-                                    </div>
-                                    <i data-lucide="chevron-down" class="w-4 h-4 text-slate-500 flex-shrink-0 transition-transform duration-200"></i>
-                                </div>
-                            </div>
-                            <!-- 对话内容区域 -->
-                            <div class="conversation-content hidden bg-slate-900/50 border-t border-slate-700/50" id="conv-${k.id}">
-                                <div class="p-3 text-slate-500 text-sm text-center">加载中...</div>
-                            </div>
-                        </div>
-                    `).join('');
-
-                    lucide.createIcons();
-
-                    // 更新统计
-                    if (result.stats) {
-                        knowledgeList.innerHTML += `
-                            <div class="mt-3 pt-3 border-t border-slate-700 text-xs text-slate-500 text-center">
-                                共 ${result.stats.total || 0} 条记录
-                            </div>
-                        `;
-                    }
-                } else {
-                    knowledgeList.innerHTML = '<span class="text-slate-600 italic text-sm">知识库为空，开始记录吧...</span>';
-                }
-            } catch (error) {
-                console.error('加载知识库失败:', error);
-            }
-        }
-
-        // 展开/收起对话内容
-        async function toggleConversation(knowledgeId, sessionId, headerElement) {
-            const contentDiv = document.getElementById(`conv-${knowledgeId}`);
-            const chevronIcon = headerElement.querySelector('[data-lucide="chevron-down"]');
-
-            // 如果已经展开，则收起
-            if (!contentDiv.classList.contains('hidden')) {
-                contentDiv.classList.add('hidden');
-                chevronIcon.style.transform = 'rotate(0deg)';
-                return;
-            }
-
-            // 如果没有会话，提示用户
-            if (!sessionId) {
-                contentDiv.classList.remove('hidden');
-                contentDiv.innerHTML = '<div class="p-3 text-slate-500 text-sm text-center">该知识条目没有关联的对话历史</div>';
-                chevronIcon.style.transform = 'rotate(180deg)';
-                return;
-            }
-
-            // 加载对话内容
-            contentDiv.classList.remove('hidden');
-            contentDiv.innerHTML = '<div class="p-3 text-slate-500 text-sm text-center">加载中...</div>';
-            chevronIcon.style.transform = 'rotate(180deg)';
-
-            try {
-                const sessResp = await fetch(`${API_BASE_URL}/api/sessions/get?session_id=${sessionId}`);
-                const sessResult = await sessResp.json();
-
-                if (sessResult.success && sessResult.session && sessResult.session.messages.length > 0) {
-                    let html = '<div class="p-3 space-y-2 max-h-[400px] overflow-y-auto">';
-                    sessResult.session.messages.forEach(msg => {
-                        const isUser = msg.role === 'user';
-                        html += `
-                            <div class="flex ${isUser ? 'justify-end' : 'justify-start'}">
-                                <div class="max-w-[85%] p-2 rounded-lg ${isUser ? 'bg-blue-500/20 text-blue-200' : 'bg-slate-700 text-slate-200'}">
-                                    <div class="text-xs font-medium mb-1 opacity-70">${isUser ? '👤 你' : '🤖 AI'}</div>
-                                    <div class="text-sm whitespace-pre-wrap">${msg.content}</div>
-                                </div>
-                            </div>
-                        `;
-                    });
-                    html += '</div>';
-                    contentDiv.innerHTML = html;
-                } else {
-                    contentDiv.innerHTML = '<div class="p-3 text-slate-500 text-sm text-center">对话历史未找到</div>';
-                }
-            } catch (error) {
-                console.error('加载对话失败:', error);
-                contentDiv.innerHTML = '<div class="p-3 text-red-400 text-sm text-center">加载失败: ' + error.message + '</div>';
-            }
-        }
-
-        // ===== 加载所有会话列表 =====
-        async function loadSessionsList() {
-            try {
-                const response = await fetch(`${API_BASE_URL}/api/sessions`);
-                if (!response.ok) throw new Error('加载失败');
-
-                const result = await response.json();
-
-                if (result.success && result.sessions && result.sessions.length > 0) {
-                    sessionsList.innerHTML = result.sessions.map(s => {
-                        const messageCount = s.messages ? s.messages.length : 0;
-                        const lastMessage = s.messages && s.messages.length > 0
-                            ? s.messages[s.messages.length - 1].content
-                            : '暂无消息';
-                        const preview = lastMessage.length > 50
-                            ? lastMessage.substring(0, 50) + '...'
-                            : lastMessage;
-
-                        return `
-                            <div class="session-item bg-slate-800/50 rounded-lg border border-slate-700/50 overflow-hidden" data-session-id="${s.id}">
-                                <div class="item-header p-3 cursor-pointer hover:bg-slate-700/30 transition-colors" onclick="toggleSessionMessages('${s.id}', this)">
-                                    <div class="flex items-start justify-between gap-2">
-                                        <div class="flex-1 min-w-0">
-                                            <div class="flex items-center gap-2 mb-1">
-                                                <span class="text-xs text-slate-500">${new Date(s.updated_at).toLocaleString()}</span>
-                                                <span class="px-2 py-0.5 text-xs rounded-full bg-purple-500/20 text-purple-300">${messageCount} 条消息</span>
-                                            </div>
-                                            <p class="text-sm text-slate-300">${preview}</p>
-                                        </div>
-                                        <i data-lucide="chevron-down" class="w-4 h-4 text-slate-500 flex-shrink-0 transition-transform duration-200"></i>
-                                    </div>
-                                </div>
-                                <div class="session-messages hidden bg-slate-900/50 border-t border-slate-700/50" id="session-${s.id}">
-                                    <div class="p-3 text-slate-500 text-sm text-center">加载中...</div>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-
-                    lucide.createIcons();
-
-                    // 更新统计
-                    sessionsList.innerHTML += `
-                        <div class="mt-3 pt-3 border-t border-slate-700 text-xs text-slate-500 text-center">
-                            共 ${result.count || result.sessions.length} 个对话
-                        </div>
+        // Helper: Update Status UI
+        function updateStatusUI(status) {
+            statusIndicator.className = 'absolute bottom-4 left-1/2 transform -translate-x-1/2 px-4 py-2 bg-slate-900/90 border border-slate-600 rounded-full shadow-xl flex items-center gap-3 z-10 transition-all duration-300'; // Reset classes
+            
+            switch (status) {
+                case 'connected':
+                    connDot.className = 'w-2 h-2 inline-block rounded-full bg-green-500 mr-1';
+                    connText.textContent = '已连接';
+                    statusIndicator.classList.add('hidden');
+                    break;
+                case 'disconnected':
+                case 'error':
+                    connDot.className = 'w-2 h-2 inline-block rounded-full bg-red-500 mr-1';
+                    connText.textContent = '连接断开';
+                    statusIndicator.classList.add('hidden');
+                    pulseRing.classList.remove('scale-150', 'opacity-100');
+                    break;
+                case 'recording':
+                    pulseRing.classList.add('scale-150', 'opacity-50'); // Show pulse
+                    statusIndicator.classList.remove('hidden');
+                    statusIndicator.innerHTML = `
+                        <span class="relative flex h-3 w-3">
+                          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                        </span>
+                        <span class="text-xs text-red-200 font-medium">正在聆听...</span>
                     `;
-                } else {
-                    sessionsList.innerHTML = '<span class="text-slate-600 italic text-sm">暂无对话记录...</span>';
-                }
-            } catch (error) {
-                console.error('加载会话列表失败:', error);
-                sessionsList.innerHTML = '<span class="text-red-400 italic text-sm">加载失败: ' + error.message + '</span>';
+                    transcriptPreview.style.opacity = 1;
+                    transcriptPreview.textContent = "正在听...";
+                    break;
+                case 'processing':
+                    pulseRing.classList.remove('scale-150', 'opacity-50');
+                    statusIndicator.classList.remove('hidden');
+                    statusIndicator.innerHTML = `
+                        <i data-lucide="loader-2" class="w-4 h-4 animate-spin text-blue-400"></i>
+                        <span class="text-xs text-blue-200">思考中...</span>
+                    `;
+                    lucide.createIcons();
+                    break;
+                case 'speaking':
+                    statusIndicator.classList.remove('hidden');
+                    statusIndicator.innerHTML = `
+                        <div class="speaking-wave">
+                            <span></span><span></span><span></span><span></span><span></span>
+                        </div>
+                        <span class="text-xs text-purple-200">正在回答</span>
+                    `;
+                    interruptBtn.classList.remove('hidden'); // Show interrupt button
+                    break;
+                case 'idle':
+                    pulseRing.classList.remove('scale-150', 'opacity-50');
+                    statusIndicator.classList.add('hidden');
+                    interruptBtn.classList.add('hidden');
+                    transcriptPreview.style.opacity = 0;
+                    currentAiMessageDiv = null;
+                    break;
             }
         }
 
-        // 展开/收起会话消息
-        async function toggleSessionMessages(sessionId, headerElement) {
-            const messagesDiv = document.getElementById(`session-${sessionId}`);
-            const chevronIcon = headerElement.querySelector('[data-lucide="chevron-down"]');
+        // Initialize Client
+        function initClient() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
 
-            // 如果已经展开，则收起
-            if (!messagesDiv.classList.contains('hidden')) {
-                messagesDiv.classList.add('hidden');
-                chevronIcon.style.transform = 'rotate(0deg)';
-                return;
-            }
-
-            // 展开并显示消息
-            messagesDiv.classList.remove('hidden');
-            chevronIcon.style.transform = 'rotate(180deg)';
-
-            try {
-                const sessResp = await fetch(`${API_BASE_URL}/api/sessions/get?session_id=${sessionId}`);
-                const sessResult = await sessResp.json();
-
-                if (sessResult.success && sessResult.session && sessResult.session.messages.length > 0) {
-                    let html = '<div class="p-3 space-y-2 max-h-[400px] overflow-y-auto">';
-                    sessResult.session.messages.forEach(msg => {
-                        const isUser = msg.role === 'user';
-                        html += `
-                            <div class="flex ${isUser ? 'justify-end' : 'justify-start'}">
-                                <div class="max-w-[85%] p-2 rounded-lg ${isUser ? 'bg-blue-500/20 text-blue-200' : 'bg-slate-700 text-slate-200'}">
-                                    <div class="text-xs font-medium mb-1 opacity-70">${isUser ? '👤 你' : '🤖 AI'}</div>
-                                    <div class="text-sm whitespace-pre-wrap">${msg.content}</div>
-                                </div>
-                            </div>
-                        `;
-                    });
-                    html += '</div>';
-                    messagesDiv.innerHTML = html;
-                } else {
-                    messagesDiv.innerHTML = '<div class="p-3 text-slate-500 text-sm text-center">暂无消息</div>';
-                }
-            } catch (error) {
-                console.error('加载会话消息失败:', error);
-                messagesDiv.innerHTML = '<div class="p-3 text-red-400 text-sm text-center">加载失败</div>';
-            }
-        }
-
-        // ===== 事件监听 =====
-
-        recordBtn.addEventListener('click', () => {
-            if (isRecording) {
-                stopRecording();
-            } else {
-                startRecording();
-            }
-        });
-
-        clearBtn.addEventListener('click', () => {
-            transcript.value = '';
-            aiReply.innerHTML = '<span class="text-slate-600 italic">AI 回复将显示在这里...</span>';
-            updateInputState();
-            recordDuration.textContent = '0s';
-            audioSize.textContent = '0 KB';
-            lastAudioBlob = null;
-            lastRecognizedText = '';
-        });
-
-        // 输入框监听
-        transcript.addEventListener('input', updateInputState);
-
-        // Ctrl+Enter 发送到 AI
-        transcript.addEventListener('keydown', (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                e.preventDefault();
-                // 检查是否处于发送状态（输入框或其他控件被禁用）
-                if (!sendBtn.disabled && !transcript.disabled) {
-                    sendBtn.click();
-                }
-            }
-        });
-
-        // 清空输入按钮
-        clearInputBtn.addEventListener('click', () => {
-            transcript.value = '';
-            updateInputState();
-        });
-
-        saveKnowledgeBtn.addEventListener('click', saveToKnowledge);
-
-        refreshKnowledgeBtn.addEventListener('click', loadKnowledgeList);
-        refreshSessionsBtn.addEventListener('click', loadSessionsList);
-
-        sendBtn.addEventListener('click', async () => {
-            // 使用编辑后的文本
-            const text = lastRecognizedText.trim();
-            if (text) {
-                // 显示加载状态并禁用所有输入控件
-                setSendingState(true);
-
-                try {
-                    // 使用 SSE 流式响应
-                    await sendChatWithSSE(text);
-                } catch (error) {
-                    console.error('发送消息失败:', error);
-                    aiReply.innerHTML = `<span class="text-red-400">错误: ${error.message}</span>`;
-                    setSendingState(false);
-                }
-            } else {
-                alert('请先录制或输入一些文字');
-            }
-        });
-
-        // 设置发送状态（禁用/启用所有输入控件）
-        function setSendingState(isSending) {
-            sendBtn.disabled = isSending;
-            playVoiceBtn.disabled = isSending;
-            transcript.disabled = isSending;
-            clearInputBtn.disabled = isSending;
-
-            if (isSending) {
-                transcript.classList.add('opacity-50');
-                aiReply.innerHTML = `<span class="text-yellow-400 flex items-center gap-2">
-                    <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    正在思考...
-                </span>`;
-            } else {
-                transcript.classList.remove('opacity-50');
-            }
-        }
-
-        // ===== SSE 流式聊天 =====
-        async function sendChatWithSSE(text) {
-            let fullReply = '';
-
-            const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    message: text,
-                    session_id: sessionId || ''
-                    // 注释：不自动生成 TTS，用户点击"播放语音"按钮时才调用
-                    // include_audio: true
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-
-            // 清空并准备显示流式内容
-            aiReply.innerHTML = '<span class="text-white"></span>';
-            const contentSpan = aiReply.querySelector('span');
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                const chunk = decoder.decode(value);
-                const lines = chunk.split('\n');
-
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const jsonStr = line.slice(6);
-                        try {
-                            const data = JSON.parse(jsonStr);
-
-                            if (data.type === 'content') {
-                                // 流式文本内容
-                                fullReply += data.delta;
-                                contentSpan.textContent = fullReply;
-                                // 自动滚动
-                                contentSpan.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                            } else if (data.type === 'done') {
-                                // 流结束
-                                console.log('流式响应完成');
-                                sessionId = data.session_id;
-                                lastAiReply = fullReply;
-                                // 恢复输入状态
-                                setSendingState(false);
-
-                                // 清除旧的 TTS 缓存
-                                cachedTTSUrl = null;
-                                console.log('已清除旧的 TTS 缓存');
-                            } else if (data.type === 'error') {
-                                throw new Error(data.error);
-                            }
-                        } catch (e) {
-                            console.error('解析 SSE 数据失败:', e, jsonStr);
-                        }
+            client = new VoiceClient(
+                wsUrl,
+                (status) => {
+                    console.log('Status:', status);
+                    updateStatusUI(status);
+                },
+                (text, isFinal) => {
+                    // Handle Transcript
+                    transcriptPreview.textContent = text;
+                    if (isFinal) {
+                        appendMessage('user', text);
                     }
+                },
+                (audioData) => {
+                    // Handle Audio (TTS)
+                    console.log('收到音频数据:', audioData.byteLength);
+                    
+                    // Create Blob and play
+                    const blob = new Blob([audioData], { type: 'audio/mp3' }); // Baidu usually returns MP3
+                    const url = URL.createObjectURL(blob);
+                    
+                    // Create AI message bubble if not exists
+                    if (!currentAiMessageDiv) {
+                        currentAiMessageDiv = appendMessage('assistant', '🔊 [正在播放语音...]');
+                    }
+                    
+                    const audio = new Audio(url);
+                    audio.onended = () => {
+                        URL.revokeObjectURL(url);
+                        // client.onStateChange('idle'); // Handled by server state or auto
+                    };
+                    audio.play().catch(e => console.error('播放失败:', e));
                 }
-            }
+            );
+            
+            client.connect();
         }
 
-        micSelect.addEventListener('change', (e) => {
-            selectedDeviceId = e.target.value;
-            console.log('选择麦克风:', e.target.options[e.target.selectedIndex].text);
-        });
+        // Initialize on load
+        window.addEventListener('load', initClient);
 
-        // ===== TTS 缓存 =====
-        // 缓存 TTS 音频 URL，避免重复生成
-        let cachedTTSUrl = null;
+        // Record Button Logic (Toggle)
+        recordBtn.addEventListener('click', () => {
+            if (!client) return;
 
-        // ===== 播放语音按钮 - 调用百度 TTS API =====
-        playVoiceBtn.addEventListener('click', async () => {
-            if (!lastAiReply) {
-                alert('请先进行 AI 对话');
-                return;
-            }
-
-            // 如果有缓存的音频 URL，直接播放
-            if (cachedTTSUrl) {
-                console.log('使用缓存的 TTS 音频:', cachedTTSUrl);
-                audioPlayer.src = cachedTTSUrl;
-                audioPlayer.style.display = 'block';
-
-                playVoiceBtn.disabled = true;
-                playVoiceBtn.innerHTML = '<i data-lucide="volume-2" class="w-3 h-3"></i> 播放中...';
-                lucide.createIcons();
-
-                try {
-                    await audioPlayer.play();
-
-                    audioPlayer.onended = () => {
-                        console.log('TTS 播放完成');
-                        playVoiceBtn.disabled = false;
-                        playVoiceBtn.innerHTML = '<i data-lucide="volume-2" class="w-3 h-3"></i> 播放语音';
-                        lucide.createIcons();
-                    };
-
-                    audioPlayer.onerror = () => {
-                        console.error('TTS 播放失败，尝试重新生成');
-                        cachedTTSUrl = null; // 清除缓存
-                        playVoiceBtn.click(); // 递归调用重新生成
-                    };
-                } catch (error) {
-                    console.error('播放失败:', error);
-                    cachedTTSUrl = null;
-                    playVoiceBtn.disabled = false;
-                    playVoiceBtn.innerHTML = '<i data-lucide="volume-2" class="w-3 h-3"></i> 播放语音';
-                    lucide.createIcons();
-                }
-                return;
-            }
-
-            // 没有缓存，调用 TTS API 生成
-            try {
-                playVoiceBtn.disabled = true;
-                playVoiceBtn.innerHTML = '<i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i> 生成中...';
-                lucide.createIcons();
-
-                // 调用百度 TTS API，传递 session_id
-                const params = new URLSearchParams({
-                    text: lastAiReply,
-                    session_id: sessionId || ''
-                });
-                const response = await fetch(`${API_BASE_URL}/api/tts?${params}`);
-
-                if (!response.ok) {
-                    throw new Error(`TTS 请求失败: ${response.status}`);
-                }
-
-                const result = await response.json();
-
-                if (!result.success || !result.audio_url) {
-                    throw new Error('TTS 生成失败');
-                }
-
-                // 构建完整的音频 URL
-                const fullAudioUrl = result.audio_url.startsWith('http')
-                    ? result.audio_url
-                    : `${API_BASE_URL}/${result.audio_url.replace(/^\//, '')}`;
-
-                // 缓存音频 URL
-                cachedTTSUrl = fullAudioUrl;
-                console.log('TTS 音频已缓存:', fullAudioUrl);
-
-                // 播放音频
-                audioPlayer.src = fullAudioUrl;
-                audioPlayer.style.display = 'block';
-
-                playVoiceBtn.innerHTML = '<i data-lucide="volume-2" class="w-3 h-3"></i> 播放中...';
-                lucide.createIcons();
-
-                await audioPlayer.play();
-
-                audioPlayer.onended = () => {
-                    console.log('TTS 播放完成');
-                    playVoiceBtn.disabled = false;
-                    playVoiceBtn.innerHTML = '<i data-lucide="volume-2" class="w-3 h-3"></i> 播放语音';
-                    lucide.createIcons();
-                };
-
-                audioPlayer.onerror = () => {
-                    console.error('TTS 播放失败');
-                    cachedTTSUrl = null;
-                    playVoiceBtn.disabled = false;
-                    playVoiceBtn.innerHTML = '<i data-lucide="volume-2" class="w-3 h-3"></i> 播放语音';
-                    lucide.createIcons();
-                    alert('音频播放失败，请重试');
-                };
-
-            } catch (error) {
-                console.error('TTS 请求失败:', error);
-                cachedTTSUrl = null;
-                playVoiceBtn.disabled = false;
-                playVoiceBtn.innerHTML = '<i data-lucide="volume-2" class="w-3 h-3"></i> 播放语音';
-                lucide.createIcons();
-                alert('语音合成失败: ' + error.message);
+            if (client.isRecording) {
+                client.stopRecording();
+                micIcon.classList.remove('text-red-500'); 
+            } else {
+                client.startRecording();
+                micIcon.classList.add('text-red-500');
             }
         });
 
-        // 保留旧的浏览器 TTS 作为备用（注释）
-        /*
-        playVoiceBtn.addEventListener('click', () => {
-            if (lastAiReply && 'speechSynthesis' in window) {
-                // 取消当前正在播放的
-                window.speechSynthesis.cancel();
-
-                const utterance = new SpeechSynthesisUtterance(lastAiReply);
-                utterance.lang = 'zh-CN';
-                utterance.rate = 1.0;
-                utterance.pitch = 1.0;
-                utterance.volume = 1.0;
-
-                // 尝试选择中文语音
-                const voices = window.speechSynthesis.getVoices();
-                const chineseVoice = voices.find(v => v.lang.includes('zh')) || voices.find(v => v.lang.includes('CN'));
-                if (chineseVoice) {
-                    utterance.voice = chineseVoice;
+        // Interrupt Button
+        interruptBtn.addEventListener('click', () => {
+            if (client) {
+                client.interrupt();
+                // Stop any playing audio
+                const audios = document.getElementsByTagName('audio');
+                for(let a of audios) {
+                    a.pause();
+                    a.currentTime = 0;
                 }
-
-                utterance.onstart = () => {
-                    playVoiceBtn.innerHTML = '<i data-lucide="volume-2" class="w-3 h-3"></i> 播放中...';
-                    lucide.createIcons();
-                };
-
-                utterance.onend = () => {
-                    playVoiceBtn.innerHTML = '<i data-lucide="volume-2" class="w-3 h-3"></i> 播放语音';
-                    lucide.createIcons();
-                };
-
-                window.speechSynthesis.speak(utterance);
-                console.log('播放 TTS:', lastAiReply);
             }
         });
-        */
 
-        // ===== 初始化 =====
-        (async function init() {
-            await checkBackend();
-            await enumerateMicrophones();
-            await loadKnowledgeList();  // 加载知识库列表
-            await loadSessionsList();   // 加载会话列表
-        })();
-
-        console.log('Voice Memory STT Demo (WAV) 初始化完成');
     </script>
 </body>
 </html>

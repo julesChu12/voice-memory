@@ -10,11 +10,10 @@ import (
 // RouterConfig 路由配置
 type RouterConfig struct {
 	STTHandler       *handler.STTHandler
-	ChatHandler      *handler.ChatHandler
-	AudioChatHandler *handler.AudioChatHandler
 	KnowledgeHandler *handler.KnowledgeHandler
 	SessionHandler   *handler.SessionHandler
 	TTSHandler       *handler.TTSHandler
+	WSHandler        *handler.WSHandler
 }
 
 // Setup 配置路由
@@ -30,19 +29,19 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		AllowCredentials: true,
 	}))
 
+	// WebSocket 路由 (Phase 2 核心)
+	router.GET("/ws", cfg.WSHandler.HandleWS)
+
+	// 以下 API 暂时保留，用于调试或特定功能
+	
 	// STT 路由
 	router.POST("/api/stt", cfg.STTHandler.Recognize)
-
-	// Chat 路由
-	router.POST("/api/chat", cfg.ChatHandler.HandleChat)
-	router.POST("/api/chat/stream", cfg.ChatHandler.HandleChatStream)
-	router.POST("/api/audio-chat", cfg.AudioChatHandler.HandleAudioChat)
 
 	// TTS 路由
 	router.GET("/api/tts", cfg.TTSHandler.HandleTTS)
 	router.GET("/api/audio/:filename", cfg.TTSHandler.ServeAudio)
 
-	// 知识库路由
+	// 知识库路由 (未来 Phase 3 将整合进 Pipeline)
 	knowledge := router.Group("/api/knowledge")
 	{
 		knowledge.POST("/record", cfg.KnowledgeHandler.HandleRecord)
@@ -50,7 +49,7 @@ func Setup(cfg RouterConfig) *gin.Engine {
 		knowledge.POST("/search", cfg.KnowledgeHandler.HandleSearch)
 	}
 
-	// 会话路由
+	// 会话历史路由 (用于前端展示归档)
 	sessions := router.Group("/api/sessions")
 	{
 		sessions.GET("", cfg.SessionHandler.HandleListSessions)
@@ -70,15 +69,14 @@ func Setup(cfg RouterConfig) *gin.Engine {
 	router.Static("/assets", "./static/assets")
 	router.StaticFile("/", "./static/index.html")
 	router.StaticFile("/index.html", "./static/index.html")
+	router.StaticFile("/ws-client.js", "./static/ws-client.js") // 显式暴露 ws-client.js
 
-	// SPA 路由回退 - 所有非 API 路由返回 index.html
+	// SPA 路由回退
 	router.NoRoute(func(c *gin.Context) {
-		// 如果是 API 路径但不存在，返回 404
-		if c.Request.URL.Path[:4] == "/api" {
+		if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] == "/api" {
 			c.JSON(404, gin.H{"error": "API endpoint not found"})
 			return
 		}
-		// 其他路径返回 index.html (SPA 路由)
 		c.File("./static/index.html")
 	})
 
