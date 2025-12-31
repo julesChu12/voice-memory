@@ -136,5 +136,5 @@ func (s *Server) printRoutes(addr string) {
 	fmt.Printf("🔍 知识搜索: http://localhost%s/api/knowledge/search\n", addr)
 	fmt.Printf("💬 会话列表: http://localhost%s/api/sessions\n", addr)
 	fmt.Printf("💚 健康检查: http://localhost%s/health\n", addr)
-	fmt.Printf("🧠 RAG 检索: 已启用 (向量搜索)\n\n", addr)
+	fmt.Printf("🧠 RAG 检索: 已启用 (向量搜索)\n\n")
 }

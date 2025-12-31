@@ -204,8 +204,11 @@ func (h *KnowledgeHandler) HandleRecord(c *gin.Context) {
 		} else {
 			knowledge.Summary = organizeResult.Summary
 			knowledge.KeyPoints = organizeResult.KeyPoints
+			knowledge.Entities = organizeResult.Entities
 			knowledge.Category = organizeResult.Category
 			knowledge.Tags = organizeResult.Tags
+			knowledge.Importance = organizeResult.Importance
+			knowledge.Sentiment = organizeResult.Sentiment
 		}
 	}
 
