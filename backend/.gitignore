@@ -50,3 +50,9 @@ Thumbs.db
 
 # Claude
 claudedocs/
+
+# User-specific Claude configuration
+../CLAUDE.md
+
+# Claude generated temporary docs
+../claudedocs/
