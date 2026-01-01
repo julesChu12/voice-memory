@@ -25,7 +25,7 @@ func NewGLMClient(apiKey string) *GLMClient {
 		apiKey:  apiKey,
 		baseURL: "https://open.bigmodel.cn/api/anthropic",
 		client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 120 * time.Second, // 增加超时时间，适应复杂任务
 		},
 	}
 }
@@ -58,7 +58,8 @@ type ImageURL struct {
 type ChatRequest struct {
 	Model       string    `json:"model"`
 	MaxTokens   int       `json:"max_tokens"`
-	Messages    []Message `json:"messages"`
+	Messages    []Message `json:"messages"` // 仅包含 user 和 assistant 消息
+	System      string    `json:"system,omitempty"` // 系统提示词 (Anthropic 风格)
 	Temperature float64   `json:"temperature,omitempty"`
 	TopP        float64   `json:"top_p,omitempty"`
 	Stream      bool      `json:"stream,omitempty"`
@@ -215,7 +216,7 @@ func (g *GLMClient) SendMessageWithAudio(audioData []byte, messages []Message) (
 	})
 
 	req := ChatRequest{
-		Model:       "glm-4-plus",  // GLM-4-Plus 支持多模态（包括音频）
+		Model:       "glm-4.7",  // 升级到最新模型
 		MaxTokens:   1024,
 		Messages:    allMessages,
 		Temperature: 0.85,

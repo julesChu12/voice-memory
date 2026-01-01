@@ -9,16 +9,16 @@ import (
 // RAGService RAG 服务（检索增强生成）
 type RAGService struct {
 	embeddingClient *EmbeddingClient
-	vectorStore     *VectorStore
+	vectorStore     VectorStore
 	mu              sync.RWMutex
 	enabled         bool
 }
 
 // NewRAGService 创建 RAG 服务
-func NewRAGService(apiKey string) *RAGService {
+func NewRAGService(apiKey string, vectorStore VectorStore) *RAGService {
 	return &RAGService{
 		embeddingClient: NewEmbeddingClient(apiKey),
-		vectorStore:     NewVectorStore(),
+		vectorStore:     vectorStore,
 		enabled:         true,
 	}
 }
@@ -36,63 +36,18 @@ func (rag *RAGService) AddKnowledge(id, content string, metadata map[string]inte
 	}
 
 	// 2. 存储到向量库
-	doc := &VectorDocument{
-		ID:        id,
-		Content:   content,
-		Vector:    result.Vector,
-		Metadata:  metadata,
-		CreatedAt: result.CreatedAt,
+	// Store content in metadata so we can retrieve it
+	if metadata == nil {
+		metadata = make(map[string]interface{})
 	}
+	metadata["content"] = content
+	metadata["created_at"] = result.CreatedAt
 
-	if err := rag.vectorStore.Add(doc); err != nil {
+	if err := rag.vectorStore.Add(id, result.Vector, metadata); err != nil {
 		return fmt.Errorf("存储向量失败: %w", err)
 	}
 
 	return nil
-}
-
-// AddKnowledgeBatch 批量添加知识
-func (rag *RAGService) AddKnowledgeBatch(knowledges []Knowledge) error {
-	if !rag.enabled {
-		return fmt.Errorf("RAG 服务未启用")
-	}
-
-	// 1. 批量生成向量
-	texts := make([]string, len(knowledges))
-	for i, k := range knowledges {
-		texts[i] = k.Content
-	}
-
-	results, err := rag.embeddingClient.EmbedBatch(texts)
-	if err != nil {
-		return fmt.Errorf("批量生成向量失败: %w", err)
-	}
-
-	// 2. 批量存储
-	docs := make([]*VectorDocument, len(knowledges))
-	for i, k := range knowledges {
-		// 转换 metadata 类型
-		metadata := make(map[string]interface{})
-		for key, val := range k.Metadata {
-			metadata[key] = val
-		}
-		// 添加其他字段
-		metadata["summary"] = k.Summary
-		metadata["category"] = k.Category
-		metadata["tags"] = k.Tags
-		metadata["source"] = k.Source
-		metadata["created_at"] = k.CreatedAt
-
-		docs[i] = &VectorDocument{
-			ID:        k.ID,
-			Content:   k.Content,
-			Vector:    results[i].Vector,
-			Metadata:  metadata,
-			CreatedAt: results[i].CreatedAt,
-		}
-	}
-
-	return rag.vectorStore.AddBatch(docs)
 }
 
 // Retrieve 检索相关知识
@@ -116,18 +71,13 @@ func (rag *RAGService) Retrieve(query string, topK int) ([]*RetrievalResult, err
 	// 3. 转换为检索结果
 	retrievalResults := make([]*RetrievalResult, len(searchResults))
 	for i, sr := range searchResults {
+		content, _ := sr.Metadata["content"].(string)
+		
 		retrievalResults[i] = &RetrievalResult{
-			ID:      sr.Document.ID,
-			Content: sr.Document.Content,
-			Score:   sr.Score,
-			Metadata: map[string]interface{}{
-				"distance":   sr.Distance,
-				"created_at": sr.Document.CreatedAt,
-			},
-		}
-		// 合并原文档的元数据
-		for k, v := range sr.Document.Metadata {
-			retrievalResults[i].Metadata[k] = v
+			ID:      sr.ID,
+			Content: content,
+			Score:   float64(sr.Score),
+			Metadata: sr.Metadata,
 		}
 	}
 
@@ -160,24 +110,9 @@ func (rag *RAGService) BuildContextWithRAG(query string, topK int) (string, erro
 	return context.String(), nil
 }
 
-// GetKnowledgeCount 获取知识库文档数量
-func (rag *RAGService) GetKnowledgeCount() int {
-	return rag.vectorStore.Count()
-}
-
-// ClearKnowledge 清空知识库
-func (rag *RAGService) ClearKnowledge() {
-	rag.vectorStore.Clear()
-}
-
 // DeleteKnowledge 删除指定知识
 func (rag *RAGService) DeleteKnowledge(id string) bool {
-	return rag.vectorStore.Delete(id)
-}
-
-// GetKnowledge 获取指定知识
-func (rag *RAGService) GetKnowledge(id string) (*VectorDocument, bool) {
-	return rag.vectorStore.Get(id)
+	return rag.vectorStore.Delete(id) == nil
 }
 
 // Enable 启用 RAG 服务

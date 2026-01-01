@@ -113,6 +113,15 @@ func (c *EmbeddingClient) Embed(text string) (*EmbeddingResult, error) {
 	}, nil
 }
 
+// GetEmbedding 实现 EmbeddingService 接口
+func (c *EmbeddingClient) GetEmbedding(text string) ([]float32, error) {
+	result, err := c.Embed(text)
+	if err != nil {
+		return nil, err
+	}
+	return result.Vector, nil
+}
+
 // EmbedBatch 批量生成向量（优化性能）
 func (c *EmbeddingClient) EmbedBatch(texts []string) ([]*EmbeddingResult, error) {
 	req := EmbeddingRequest{

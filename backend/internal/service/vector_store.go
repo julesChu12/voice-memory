@@ -1,200 +1,144 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
-	"time"
 )
 
-// VectorDocument 向量文档
-type VectorDocument struct {
+// VectorItem 向量条目
+type VectorItem struct {
 	ID        string                 `json:"id"`
-	Content   string                 `json:"content"`
-	Vector    []float32              `json:"vector"`
+	Embedding []float32              `json:"embedding"`
 	Metadata  map[string]interface{} `json:"metadata"`
-	CreatedAt time.Time              `json:"created_at"`
 }
 
-// SearchResult 搜索结果
-type SearchResult struct {
-	Document   *VectorDocument `json:"document"`
-	Score      float64         `json:"score"`
-	Distance   float64         `json:"distance"`
+// SimpleVectorStore 纯 Go 实现的简单向量存储
+type SimpleVectorStore struct {
+	items    map[string]VectorItem
+	filePath string
+	mu       sync.RWMutex
 }
 
-// VectorStore 向量存储（内存版）
-type VectorStore struct {
-	mu        sync.RWMutex
-	documents map[string]*VectorDocument
-	dimension int
-}
-
-// NewVectorStore 创建向量存储
-func NewVectorStore() *VectorStore {
-	return &VectorStore{
-		documents: make(map[string]*VectorDocument),
-		dimension: 1024, // embedding-2 模型的维度
-	}
-}
-
-// Add 添加文档到向量存储
-func (vs *VectorStore) Add(doc *VectorDocument) error {
-	vs.mu.Lock()
-	defer vs.mu.Unlock()
-
-	// 验证向量维度
-	if len(doc.Vector) != vs.dimension {
-		return fmt.Errorf("向量维度不匹配: 期望 %d, 得到 %d", vs.dimension, len(doc.Vector))
+// NewSimpleVectorStore 创建简单的向量存储
+func NewSimpleVectorStore(dataDir string) (*SimpleVectorStore, error) {
+	filePath := filepath.Join(dataDir, "vectors.json")
+	store := &SimpleVectorStore{
+		items:    make(map[string]VectorItem),
+		filePath: filePath,
 	}
 
-	// 设置创建时间
-	if doc.CreatedAt.IsZero() {
-		doc.CreatedAt = time.Now()
-	}
-
-	vs.documents[doc.ID] = doc
-	return nil
-}
-
-// AddBatch 批量添加文档
-func (vs *VectorStore) AddBatch(docs []*VectorDocument) error {
-	vs.mu.Lock()
-	defer vs.mu.Unlock()
-
-	for _, doc := range docs {
-		if len(doc.Vector) != vs.dimension {
-			return fmt.Errorf("文档 %s 向量维度不匹配", doc.ID)
+	// 尝试加载现有数据
+	if err := store.load(); err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("加载向量数据失败: %w", err)
 		}
-		if doc.CreatedAt.IsZero() {
-			doc.CreatedAt = time.Now()
-		}
-		vs.documents[doc.ID] = doc
+		// 如果文件不存在，初始化为空
 	}
 
-	return nil
+	return store, nil
 }
 
-// Search 搜索最相似的文档（余弦相似度）
-func (vs *VectorStore) Search(queryVector []float32, topK int) ([]*SearchResult, error) {
-	vs.mu.RLock()
-	defer vs.mu.RUnlock()
+// Add 添加向量
+func (s *SimpleVectorStore) Add(id string, embedding []float32, metadata map[string]interface{}) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	// 验证查询向量维度
-	if len(queryVector) != vs.dimension {
-		return nil, fmt.Errorf("查询向量维度不匹配: 期望 %d, 得到 %d", vs.dimension, len(queryVector))
+	s.items[id] = VectorItem{
+		ID:        id,
+		Embedding: embedding,
+		Metadata:  metadata,
 	}
 
-	if len(vs.documents) == 0 {
-		return []*SearchResult{}, nil
+	return s.save()
+}
+
+// Delete 删除向量
+func (s *SimpleVectorStore) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.items, id)
+	return s.save()
+}
+
+// Search 搜索相似向量
+func (s *SimpleVectorStore) Search(queryVector []float32, limit int) ([]VectorResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	type scoredItem struct {
+		item  VectorItem
+		score float32
 	}
 
-	// 计算所有文档的相似度
-	results := make([]*SearchResult, 0, len(vs.documents))
-	for _, doc := range vs.documents {
-		score := cosineSimilarity(queryVector, doc.Vector)
-		results = append(results, &SearchResult{
-			Document: doc,
-			Score:    score,
-			Distance: 1 - score, // 距离 = 1 - 相似度
-		})
+	var candidates []scoredItem
+
+	for _, item := range s.items {
+		score := cosineSimilarity(queryVector, item.Embedding)
+		candidates = append(candidates, scoredItem{item: item, score: score})
 	}
 
-	// 按相似度降序排序
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
+	// 排序 (分数从高到低)
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score > candidates[j].score
 	})
 
-	// 返回 top-K 结果
-	if topK > len(results) {
-		topK = len(results)
+	// 取 TopK
+	if limit > len(candidates) {
+		limit = len(candidates)
 	}
-	return results[:topK], nil
-}
 
-// Get 根据 ID 获取文档
-func (vs *VectorStore) Get(id string) (*VectorDocument, bool) {
-	vs.mu.RLock()
-	defer vs.mu.RUnlock()
-
-	doc, exists := vs.documents[id]
-	return doc, exists
-}
-
-// Delete 删除文档
-func (vs *VectorStore) Delete(id string) bool {
-	vs.mu.Lock()
-	defer vs.mu.Unlock()
-
-	if _, exists := vs.documents[id]; exists {
-		delete(vs.documents, id)
-		return true
+	results := make([]VectorResult, limit)
+	for i := 0; i < limit; i++ {
+		results[i] = VectorResult{
+			ID:       candidates[i].item.ID,
+			Score:    candidates[i].score,
+			Metadata: candidates[i].item.Metadata,
+		}
 	}
-	return false
+
+	return results, nil
 }
 
-// Count 获取文档数量
-func (vs *VectorStore) Count() int {
-	vs.mu.RLock()
-	defer vs.mu.RUnlock()
-
-	return len(vs.documents)
+// save 保存到文件
+func (s *SimpleVectorStore) save() error {
+	data, err := json.MarshalIndent(s.items, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.filePath, data, 0644)
 }
 
-// Clear 清空所有文档
-func (vs *VectorStore) Clear() {
-	vs.mu.Lock()
-	defer vs.mu.Unlock()
-
-	vs.documents = make(map[string]*VectorDocument)
+// load 从文件加载
+func (s *SimpleVectorStore) load() error {
+	data, err := os.ReadFile(s.filePath)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, &s.items)
 }
 
 // cosineSimilarity 计算余弦相似度
-func cosineSimilarity(a, b []float32) float64 {
-	if len(a) != len(b) {
+func cosineSimilarity(a, b []float32) float32 {
+	if len(a) != len(b) || len(a) == 0 {
 		return 0
 	}
 
-	var dotProduct float64
-	var normA float64
-	var normB float64
-
+	var dotProduct, normA, normB float32
 	for i := 0; i < len(a); i++ {
-		dotProduct += float64(a[i] * b[i])
-		normA += float64(a[i] * a[i])
-		normB += float64(b[i] * b[i])
+		dotProduct += a[i] * b[i]
+		normA += a[i] * a[i]
+		normB += b[i] * b[i]
 	}
 
 	if normA == 0 || normB == 0 {
 		return 0
 	}
 
-	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
-}
-
-// UpdateMetadata 更新文档元数据
-func (vs *VectorStore) UpdateMetadata(id string, metadata map[string]interface{}) error {
-	vs.mu.Lock()
-	defer vs.mu.Unlock()
-
-	doc, exists := vs.documents[id]
-	if !exists {
-		return fmt.Errorf("文档 %s 不存在", id)
-	}
-
-	doc.Metadata = metadata
-	return nil
-}
-
-// ListAll 列出所有文档（谨慎使用，数据量大时性能差）
-func (vs *VectorStore) ListAll() []*VectorDocument {
-	vs.mu.RLock()
-	defer vs.mu.RUnlock()
-
-	docs := make([]*VectorDocument, 0, len(vs.documents))
-	for _, doc := range vs.documents {
-		docs = append(docs, doc)
-	}
-	return docs
+	return dotProduct / (float32(math.Sqrt(float64(normA))) * float32(math.Sqrt(float64(normB))))
 }

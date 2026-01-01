@@ -13,7 +13,7 @@ import (
 
 // KnowledgeHandler 知识库处理器
 type KnowledgeHandler struct {
-	sttService   *service.BaiduSTT
+	sttService   service.STTService
 	organizer    *service.KnowledgeOrganizer
 	database     *service.Database
 	audioDir     string
@@ -22,7 +22,7 @@ type KnowledgeHandler struct {
 
 // NewKnowledgeHandler 创建知识库处理器
 func NewKnowledgeHandler(
-	sttService *service.BaiduSTT,
+	sttService service.STTService,
 	organizer *service.KnowledgeOrganizer,
 	database *service.Database,
 	audioDir string,

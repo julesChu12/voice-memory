@@ -18,12 +18,14 @@ import (
 
 // WSHandler WebSocket 处理器
 type WSHandler struct {
-	upgrader       websocket.Upgrader
-	sessionManager *service.SessionManager
-	sttService     service.STTService
-	llmService     service.LLMService
-	ttsService     service.TTSService
-	intentService  service.IntentService
+	upgrader           websocket.Upgrader
+	sessionManager     *service.SessionManager
+	sttService         service.STTService
+	llmService         service.LLMService
+	ttsService         service.TTSService
+	intentService      service.IntentService
+	knowledgeOrganizer *service.KnowledgeOrganizer
+	db                 *service.Database
 }
 
 // NewWSHandler 创建 WebSocket 处理器
@@ -33,6 +35,8 @@ func NewWSHandler(
 	llm service.LLMService,
 	tts service.TTSService,
 	intent service.IntentService,
+	organizer *service.KnowledgeOrganizer,
+	db *service.Database,
 ) *WSHandler {
 	return &WSHandler{
 		upgrader: websocket.Upgrader{
@@ -40,11 +44,13 @@ func NewWSHandler(
 				return true // 允许跨域
 			},
 		},
-		sessionManager: sm,
-		sttService:     stt,
-		llmService:     llm,
-		ttsService:     tts,
-		intentService:  intent,
+		sessionManager:     sm,
+		sttService:         stt,
+		llmService:         llm,
+		ttsService:         tts,
+		intentService:      intent,
+		knowledgeOrganizer: organizer,
+		db:                 db,
 	}
 }
 
@@ -79,6 +85,7 @@ func (h *WSHandler) HandleWS(c *gin.Context) {
 		pipeline.NewSTTProcessor(h.sttService),
 		pipeline.NewIntentProcessor(h.intentService),
 		pipeline.NewLLMProcessor(h.llmService, h.sessionManager),
+		pipeline.NewKnowledgeProcessor(h.knowledgeOrganizer, h.db), // 知识整理 (异步)
 		// pipeline.NewTTSProcessor(h.ttsService), // 开发阶段禁用 TTS，节省资源
 	)
 

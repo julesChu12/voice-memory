@@ -9,11 +9,11 @@ import (
 
 // STTHandler STT 处理器
 type STTHandler struct {
-	sttService *service.BaiduSTT
+	sttService service.STTService
 }
 
 // NewSTTHandler 创建 STT 处理器
-func NewSTTHandler(sttService *service.BaiduSTT) *STTHandler {
+func NewSTTHandler(sttService service.STTService) *STTHandler {
 	return &STTHandler{
 		sttService: sttService,
 	}

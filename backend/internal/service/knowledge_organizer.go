@@ -102,7 +102,7 @@ func (o *KnowledgeOrganizer) Organize(content string) (*KnowledgeOrganizeResult,
 	}
 
 	req := ChatRequest{
-		Model:       "glm-4-flash", // 使用快速模型
+		Model:       "glm-4.7", // 升级到最新模型，提升提取质量
 		MaxTokens:   1024,          // 增加 Token 数量以适应更复杂的输出
 		Messages:    messages,
 		Temperature: 0.2, // 更低的温度，确保结构化输出的稳定性
@@ -261,7 +261,7 @@ func (o *KnowledgeOrganizer) GenerateTitleFromSession(session *Session) (string,
 	}
 
 	req := ChatRequest{
-		Model:       "glm-4-flash",
+		Model:       "glm-4.7",
 		MaxTokens:   100,
 		Messages:    messages,
 		Temperature: 0.3,

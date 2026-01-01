@@ -32,11 +32,33 @@ func New(cfg *config.Config) (*Server, error) {
 	audioDir := fmt.Sprintf("%s/audio", dataDir)
 
 	// 创建基础服务
-	sttService := service.NewBaiduSTT(cfg.BaiduAPIKey, cfg.BaiduSecretKey)
-	ttsService := service.NewBaiduTTSWithDir(cfg.BaiduAPIKey, cfg.BaiduSecretKey, audioDir)
+	var sttService service.STTService
+	if cfg.STTProvider == "sherpa" {
+		fmt.Printf("🎤 使用 Sherpa STT: %s\n", cfg.SherpaSTTAddr)
+		sttService = service.NewSherpaSTT(cfg.SherpaSTTAddr)
+	} else {
+		fmt.Printf("🎤 使用 Baidu STT\n")
+		sttService = service.NewBaiduSTT(cfg.BaiduAPIKey, cfg.BaiduSecretKey)
+	}
+
+	var ttsService service.TTSService
+	if cfg.TTSProvider == "sherpa" {
+		fmt.Printf("🔊 使用 Sherpa TTS: %s\n", cfg.SherpaTTSAddr)
+		ttsService = service.NewSherpaTTSWithDir(cfg.SherpaTTSAddr, audioDir)
+	} else {
+		fmt.Printf("🔊 使用 Baidu TTS\n")
+		ttsService = service.NewBaiduTTSWithDir(cfg.BaiduAPIKey, cfg.BaiduSecretKey, audioDir)
+	}
+
 	glmClient := service.NewGLMClient(cfg.GLMAPIKey)
 	intentRecognizer := service.NewIntentRecognizer()
-	ragService := service.NewRAGService(cfg.GLMAPIKey)
+
+	// 创建向量存储
+	vectorStore, err := service.NewSimpleVectorStore(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("创建向量存储失败: %w", err)
+	}
+	ragService := service.NewRAGService(cfg.GLMAPIKey, vectorStore)
 
 	// 加载现有知识到向量库
 	knowledges, err := database.GetAllKnowledge()
@@ -69,6 +91,8 @@ func New(cfg *config.Config) (*Server, error) {
 		glmClient,
 		ttsService,
 		intentRecognizer,
+		knowledgeOrganizer,
+		database,
 	)
 
 	// 配置路由

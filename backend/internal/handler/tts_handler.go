@@ -9,11 +9,11 @@ import (
 
 // TTSHandler TTS 处理器
 type TTSHandler struct {
-	ttsService *service.BaiduTTS
+	ttsService service.TTSService
 }
 
 // NewTTSHandler 创建 TTS 处理器
-func NewTTSHandler(ttsService *service.BaiduTTS) *TTSHandler {
+func NewTTSHandler(ttsService service.TTSService) *TTSHandler {
 	return &TTSHandler{
 		ttsService: ttsService,
 	}

@@ -23,8 +23,12 @@ func (m *MockSTTService) Recognize(req *service.RecognizeRequest) ([]string, err
 type MockLLMService struct{}
 
 func (m *MockLLMService) SendMessage(req service.ChatRequest) (*service.ChatResponse, error) {
-	// Dummy implementation for interface satisfaction
-	return nil, nil
+	return &service.ChatResponse{
+		Type: "message",
+		Content: []service.Content{
+			{Type: "text", Text: "organized knowledge"},
+		},
+	}, nil
 }
 
 func (m *MockLLMService) SendMessageStream(req service.ChatRequest, callback func(service.StreamChunk)) error {
@@ -38,6 +42,14 @@ type MockTTSService struct{}
 
 func (m *MockTTSService) Synthesize(options service.TTSOptions) ([]byte, error) {
 	return []byte{1, 2, 3, 4}, nil
+}
+
+func (m *MockTTSService) SynthesizeToFile(options service.TTSOptions) (string, error) {
+	return "mock_audio.mp3", nil
+}
+
+func (m *MockTTSService) ServeAudio(filename string) ([]byte, string, error) {
+	return []byte{1, 2, 3, 4}, "audio/mpeg", nil
 }
 
 // MockIntentService 模拟意图
@@ -59,8 +71,11 @@ func setupWSServer(t *testing.T) (*httptest.Server, *service.SessionManager) {
 	db, _ := service.NewDatabase(tempDir)
 	sm := service.NewSessionManagerWithDB(db)
 
+	// 创建 KnowledgeOrganizer
+	organizer := service.NewKnowledgeOrganizer(llm)
+
 	// 创建 Handler
-	wsHandler := NewWSHandler(sm, stt, llm, tts, intent)
+	wsHandler := NewWSHandler(sm, stt, llm, tts, intent, organizer, db)
 
 	// 设置路由
 	gin.SetMode(gin.TestMode)

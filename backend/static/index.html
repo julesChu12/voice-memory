@@ -6,7 +6,63 @@
     <title>Voice Memory - 可打断语音助手</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
+        /* Markdown Styles within Chat Bubbles */
+        .prose {
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+        .prose h1, .prose h2, .prose h3 {
+            font-weight: 700;
+            margin-top: 0.5em;
+            margin-bottom: 0.3em;
+            color: #e2e8f0; /* slate-200 */
+        }
+        .prose h1 { font-size: 1.2em; }
+        .prose h2 { font-size: 1.1em; }
+        .prose h3 { font-size: 1.05em; }
+        .prose ul, .prose ol {
+            margin-left: 1.2em;
+            margin-bottom: 0.5em;
+            list-style-type: disc;
+        }
+        .prose ol { list-style-type: decimal; }
+        .prose li { margin-bottom: 0.2em; }
+        .prose p { margin-bottom: 0.5em; }
+        .prose strong { font-weight: 700; color: #f8fafc; /* slate-50 */ }
+        .prose em { font-style: italic; }
+        .prose code {
+            background-color: rgba(30, 41, 59, 0.5); /* slate-800/50 */
+            padding: 0.1em 0.3em;
+            border-radius: 0.2em;
+            font-family: monospace;
+            font-size: 0.9em;
+            color: #93c5fd; /* blue-300 */
+        }
+        .prose pre {
+            background-color: rgba(15, 23, 42, 0.5); /* slate-900/50 */
+            padding: 0.8em;
+            border-radius: 0.5em;
+            overflow-x: auto;
+            margin-bottom: 0.5em;
+        }
+        .prose pre code {
+            background-color: transparent;
+            padding: 0;
+            color: #cbd5e1; /* slate-300 */
+        }
+        .prose blockquote {
+            border-left: 3px solid #475569; /* slate-600 */
+            padding-left: 0.8em;
+            color: #94a3b8; /* slate-400 */
+            font-style: italic;
+        }
+        .prose hr {
+            border-color: #334155; /* slate-700 */
+            margin: 1em 0;
+        }
+
         @keyframes pulse-ring {
             0% { transform: scale(0.8); opacity: 1; }
             100% { transform: scale(1.4); opacity: 0; }
@@ -154,12 +210,24 @@
             div.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`;
             
             const bubble = document.createElement('div');
-            bubble.className = `max-w-[85%] p-3 rounded-2xl text-sm shadow-sm leading-relaxed ${
-                role === 'user' 
-                ? 'rounded-tr-none bg-blue-600 text-white' 
-                : 'rounded-tl-none bg-slate-700/80 text-slate-200 border border-slate-600/30'
-            }`;
-            bubble.textContent = text;
+            // Base classes
+            let bubbleClasses = `max-w-[85%] p-3 rounded-2xl text-sm shadow-sm leading-relaxed overflow-hidden`;
+            
+            if (role === 'user') {
+                bubbleClasses += ` rounded-tr-none bg-blue-600 text-white`;
+                bubble.className = bubbleClasses;
+                bubble.textContent = text; // Plain text for user
+            } else {
+                bubbleClasses += ` rounded-tl-none bg-slate-700/80 text-slate-200 border border-slate-600/30 prose`; // Add prose class
+                bubble.className = bubbleClasses;
+                // Parse Markdown for assistant
+                try {
+                    bubble.innerHTML = marked.parse(text);
+                } catch (e) {
+                    console.error('Markdown parsing error:', e);
+                    bubble.textContent = text; // Fallback
+                }
+            }
             
             div.appendChild(bubble);
             messagesDiv.appendChild(div);
