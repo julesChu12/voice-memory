@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -78,7 +79,7 @@ func (h *WSHandler) HandleWS(c *gin.Context) {
 		pipeline.NewSTTProcessor(h.sttService),
 		pipeline.NewIntentProcessor(h.intentService),
 		pipeline.NewLLMProcessor(h.llmService, h.sessionManager),
-		pipeline.NewTTSProcessor(h.ttsService),
+		// pipeline.NewTTSProcessor(h.ttsService), // 开发阶段禁用 TTS，节省资源
 	)
 
 	// 4. 循环读取
@@ -131,15 +132,66 @@ func (h *WSHandler) HandleWS(c *gin.Context) {
 			}(ctx, data)
 
 		case websocket.TextMessage:
-			// 收到文本指令 (如 interrupt)
-			msg := string(data)
-			if msg == `{"type":"interrupt"}` || msg == "interrupt" {
-				cancelCurrent()
-				sendJSON(conn, "state", "idle") // 告诉前端已重置
+			// 收到文本指令
+			var msg struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
 			}
-			log.Printf("[WS] 收到文本消息: %s", msg)
+			if err := json.Unmarshal(data, &msg); err != nil {
+				// 兼容旧的字符串指令 (比如直接发送 "interrupt")
+				msgStr := string(data)
+				if msgStr == "interrupt" {
+					msg.Type = "interrupt"
+				} else {
+					log.Printf("[WS] 无法解析文本消息: %v", err)
+					continue
+				}
+			}
+
+			switch msg.Type {
+			case "interrupt":
+				cancelCurrent()
+				sendJSON(conn, "state", "idle")
+			case "text":
+				// 处理纯文本输入
+				cancelCurrent()
+				mu.Lock()
+				ctx, cancel := context.WithCancel(context.Background())
+				currentCancel = cancel
+				mu.Unlock()
+				go handleText(ctx, conn, pipe, sessionID, msg.Text, h.sessionManager)
+			}
+			log.Printf("[WS] 收到指令: %+v", msg)
 		}
 	}
+}
+
+// handleText 处理纯文本输入
+func handleText(ctx context.Context, conn *websocket.Conn, pipe *pipeline.Pipeline, sessionID, text string, sm *service.SessionManager) {
+	sendJSON(conn, "state", "processing")
+
+	pCtx := pipeline.NewPipelineContext(ctx, sessionID)
+	pCtx.Transcript = text // 直接设置文本，跳过 STT
+
+	// 我们需要一个不含 STT 的 Pipeline，或者让 STTProcessor 发现有文本时自动跳过
+	// 为了简单起见，我们直接执行现有的 pipe，并在执行前确保 Transcript 已存在
+	// STTProcessor 应该在有文本时返回 true (继续) 且不做任何事
+	
+	if err := pipe.Execute(pCtx); err != nil {
+		if ctx.Err() == context.Canceled {
+			return
+		}
+		sendJSON(conn, "error", err.Error())
+		return
+	}
+
+	// 发送 LLM 回复
+	if pCtx.LLMReply != "" {
+		log.Printf("[WS] AI 回复 (Session: %s): %s", sessionID, pCtx.LLMReply)
+		sendJSON(conn, "llm_reply", pCtx.LLMReply)
+	}
+
+	sendJSON(conn, "state", "idle")
 }
 
 // handleAudio 处理音频输入
@@ -170,7 +222,14 @@ func handleAudio(ctx context.Context, conn *websocket.Conn, pipe *pipeline.Pipel
 	}
 
 	// 发送 STT 结果
+	log.Printf("[WS] 用户输入 (Session: %s): %s", sessionID, pCtx.Transcript)
 	sendJSON(conn, "stt_final", pCtx.Transcript)
+
+	// 发送 LLM 回复文本 (替代 TTS)
+	if pCtx.LLMReply != "" {
+		log.Printf("[WS] AI 回复 (Session: %s): %s", sessionID, pCtx.LLMReply)
+		sendJSON(conn, "llm_reply", pCtx.LLMReply)
+	}
 
 	// 发送 TTS 音频 (如果有)
 	if len(pCtx.OutputAudio) > 0 {

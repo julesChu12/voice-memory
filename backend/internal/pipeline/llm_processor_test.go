@@ -11,6 +11,11 @@ type MockLLMService struct {
 	Reply string
 }
 
+func (m *MockLLMService) SendMessage(req service.ChatRequest) (*service.ChatResponse, error) {
+	// Dummy implementation for interface satisfaction
+	return nil, nil
+}
+
 func (m *MockLLMService) SendMessageStream(req service.ChatRequest, callback func(service.StreamChunk)) error {
 	// 模拟流式发送几个词
 	words := []string{"你好", "，我是", "AI", "助手"}
@@ -23,11 +28,20 @@ func (m *MockLLMService) SendMessageStream(req service.ChatRequest, callback fun
 
 func TestLLMProcessor_Process(t *testing.T) {
 	mockLLM := &MockLLMService{}
-	sm := service.NewSessionManager()
+	
+	// --- FIX: Use a database-backed SessionManager for the test ---
+	tempDir := t.TempDir()
+	db, err := service.NewDatabase(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to create temp database: %v", err)
+	}
+	defer db.Close()
+	sm := service.NewSessionManagerWithDB(db)
+	// -------------------------------------------------------------
+
 	proc := NewLLMProcessor(mockLLM, sm)
 
 	sessionID := "test-session"
-	// 【关键修复】确保会话已存在
 	sm.GetOrCreateSession(sessionID)
 
 	ctx := NewPipelineContext(context.Background(), sessionID)

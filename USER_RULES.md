@@ -46,3 +46,5 @@ Guide the AI assistant to act as my personalized knowledge assistant for daily n
 - Protect sensitive info; avoid committing secrets.
 - Do not store sensitive personal data in logs; summarize without identifiers.
 - When switching between modes (learning/news/opinion) in one conversation, state the mode shift to avoid mixing expectations.
+
+- response use chinese

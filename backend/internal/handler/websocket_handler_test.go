@@ -22,6 +22,11 @@ func (m *MockSTTService) Recognize(req *service.RecognizeRequest) ([]string, err
 // MockLLMService 模拟 LLM
 type MockLLMService struct{}
 
+func (m *MockLLMService) SendMessage(req service.ChatRequest) (*service.ChatResponse, error) {
+	// Dummy implementation for interface satisfaction
+	return nil, nil
+}
+
 func (m *MockLLMService) SendMessageStream(req service.ChatRequest, callback func(service.StreamChunk)) error {
 	callback(service.StreamChunk{Delta: "world"})
 	callback(service.StreamChunk{Done: true})
@@ -88,8 +93,9 @@ func TestWSHandler_Connection(t *testing.T) {
 	}
 
 	// 2. 接收响应循环
-	// 我们期望收到一系列状态更新：processing -> stt_final -> speaking -> idle
+	// 我们期望收到一系列状态更新：processing -> stt_final -> llm_reply -> idle
 	receivedStates := make(map[string]bool)
+	receivedLLM := false
 	timeout := time.After(2 * time.Second)
 
 	for {
@@ -99,11 +105,10 @@ func TestWSHandler_Connection(t *testing.T) {
 		default:
 			var msg map[string]interface{}
 			if err := conn.ReadJSON(&msg); err != nil {
-				// 如果是二进制消息(TTS音频)，跳过
+				// 如果是二进制消息(TTS音频)，虽然现在禁用了，但如果收到也不应该报错，只是跳过
 				if websocket.IsUnexpectedCloseError(err) {
 					t.Fatalf("连接意外关闭: %v", err)
 				}
-				// 收到二进制消息是正常的(TTS音频)，继续
 				continue
 			}
 
@@ -118,10 +123,17 @@ func TestWSHandler_Connection(t *testing.T) {
 					t.Errorf("STT 结果错误: %s", text)
 				}
 				t.Logf("收到 STT: %s", text)
+			} else if msgType == "llm_reply" {
+				text, _ := msg["text"].(string)
+				if text != "world" {
+					t.Errorf("LLM 结果错误: %s", text)
+				}
+				t.Logf("收到 LLM 回复: %s", text)
+				receivedLLM = true
 			}
 			
-			// 如果收到了 idle，说明一轮对话结束
-			if receivedStates["idle"] && receivedStates["speaking"] {
+			// 如果收到了 idle 且收到了 LLM 回复，说明一轮对话结束
+			if receivedStates["idle"] && receivedLLM {
 				return // 测试通过
 			}
 		}

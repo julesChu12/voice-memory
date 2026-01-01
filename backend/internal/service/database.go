@@ -82,6 +82,11 @@ func (d *Database) initTables() error {
 		`ALTER TABLE knowledge ADD COLUMN importance TEXT`,
 		`ALTER TABLE knowledge ADD COLUMN sentiment TEXT`,
 
+		// v2.0 新增字段 (关系、观察、行动项)
+		`ALTER TABLE knowledge ADD COLUMN relations TEXT`,
+		`ALTER TABLE knowledge ADD COLUMN observations TEXT`,
+		`ALTER TABLE knowledge ADD COLUMN action_items TEXT`,
+
 		// 索引
 		`CREATE INDEX IF NOT EXISTS idx_knowledge_category ON knowledge(category)`,
 		`CREATE INDEX IF NOT EXISTS idx_knowledge_session_id ON knowledge(session_id)`,
@@ -187,11 +192,14 @@ func (d *Database) SaveKnowledge(knowledge *Knowledge) error {
 	keyPointsJSON, _ := json.Marshal(knowledge.KeyPoints)
 	tagsJSON, _ := json.Marshal(knowledge.Tags)
 	entitiesJSON, _ := json.Marshal(knowledge.Entities)
+	relationsJSON, _ := json.Marshal(knowledge.Relations)
+	observationsJSON, _ := json.Marshal(knowledge.Observations)
+	actionItemsJSON, _ := json.Marshal(knowledge.ActionItems)
 	metadataJSON, _ := json.Marshal(knowledge.Metadata)
 
 	query := `INSERT OR REPLACE INTO knowledge
-			  (id, title, content, summary, key_points, entities, category, tags, importance, sentiment, source, audio_url, session_id, created_at, updated_at, metadata)
-			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			  (id, title, content, summary, key_points, entities, relations, observations, action_items, category, tags, importance, sentiment, source, audio_url, session_id, created_at, updated_at, metadata)
+			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	createdAt := knowledge.CreatedAt.Unix()
 	updatedAt := knowledge.UpdatedAt.Unix()
@@ -203,6 +211,9 @@ func (d *Database) SaveKnowledge(knowledge *Knowledge) error {
 		knowledge.Summary,
 		string(keyPointsJSON),
 		string(entitiesJSON),
+		string(relationsJSON),
+		string(observationsJSON),
+		string(actionItemsJSON),
 		knowledge.Category,
 		string(tagsJSON),
 		knowledge.Importance,
@@ -220,7 +231,7 @@ func (d *Database) SaveKnowledge(knowledge *Knowledge) error {
 
 // GetAllKnowledge 获取所有知识
 func (d *Database) GetAllKnowledge() ([]Knowledge, error) {
-	query := `SELECT id, COALESCE(title, '') as title, content, summary, key_points, COALESCE(entities, '{}') as entities, category, tags, COALESCE(importance, 'medium') as importance, COALESCE(sentiment, 'neutral') as sentiment, source, audio_url, session_id, created_at, updated_at, metadata
+	query := `SELECT id, COALESCE(title, '') as title, content, summary, key_points, COALESCE(entities, '{}') as entities, COALESCE(relations, '[]') as relations, COALESCE(observations, '[]') as observations, COALESCE(action_items, '[]') as action_items, category, tags, COALESCE(importance, 'medium') as importance, COALESCE(sentiment, 'neutral') as sentiment, source, audio_url, session_id, created_at, updated_at, metadata
 			  FROM knowledge ORDER BY created_at DESC`
 
 	rows, err := d.db.Query(query)
@@ -232,7 +243,7 @@ func (d *Database) GetAllKnowledge() ([]Knowledge, error) {
 	var knowledges []Knowledge
 	for rows.Next() {
 		var k Knowledge
-		var keyPointsJSON, tagsJSON, entitiesJSON, metadataJSON string
+		var keyPointsJSON, tagsJSON, entitiesJSON, relationsJSON, observationsJSON, actionItemsJSON, metadataJSON string
 		var createdAt, updatedAt int64
 
 		err := rows.Scan(
@@ -242,6 +253,9 @@ func (d *Database) GetAllKnowledge() ([]Knowledge, error) {
 			&k.Summary,
 			&keyPointsJSON,
 			&entitiesJSON,
+			&relationsJSON,
+			&observationsJSON,
+			&actionItemsJSON,
 			&k.Category,
 			&tagsJSON,
 			&k.Importance,
@@ -260,6 +274,9 @@ func (d *Database) GetAllKnowledge() ([]Knowledge, error) {
 		json.Unmarshal([]byte(keyPointsJSON), &k.KeyPoints)
 		json.Unmarshal([]byte(tagsJSON), &k.Tags)
 		json.Unmarshal([]byte(entitiesJSON), &k.Entities)
+		json.Unmarshal([]byte(relationsJSON), &k.Relations)
+		json.Unmarshal([]byte(observationsJSON), &k.Observations)
+		json.Unmarshal([]byte(actionItemsJSON), &k.ActionItems)
 		json.Unmarshal([]byte(metadataJSON), &k.Metadata)
 
 		k.CreatedAt = time.Unix(createdAt, 0)
@@ -273,7 +290,7 @@ func (d *Database) GetAllKnowledge() ([]Knowledge, error) {
 
 // GetKnowledgeByCategory 按分类获取知识
 func (d *Database) GetKnowledgeByCategory(category string) ([]Knowledge, error) {
-	query := `SELECT id, COALESCE(title, '') as title, content, summary, key_points, category, tags, source, audio_url, session_id, created_at, updated_at, metadata
+	query := `SELECT id, COALESCE(title, '') as title, content, summary, key_points, COALESCE(entities, '{}') as entities, COALESCE(relations, '[]') as relations, COALESCE(observations, '[]') as observations, COALESCE(action_items, '[]') as action_items, category, tags, COALESCE(importance, 'medium') as importance, COALESCE(sentiment, 'neutral') as sentiment, source, audio_url, session_id, created_at, updated_at, metadata
 			  FROM knowledge WHERE category = ? ORDER BY created_at DESC`
 
 	rows, err := d.db.Query(query, category)
@@ -285,7 +302,7 @@ func (d *Database) GetKnowledgeByCategory(category string) ([]Knowledge, error) 
 	var knowledges []Knowledge
 	for rows.Next() {
 		var k Knowledge
-		var keyPointsJSON, tagsJSON, metadataJSON string
+		var keyPointsJSON, tagsJSON, entitiesJSON, relationsJSON, observationsJSON, actionItemsJSON, metadataJSON string
 		var createdAt, updatedAt int64
 
 		err := rows.Scan(
@@ -294,8 +311,14 @@ func (d *Database) GetKnowledgeByCategory(category string) ([]Knowledge, error) 
 			&k.Content,
 			&k.Summary,
 			&keyPointsJSON,
+			&entitiesJSON,
+			&relationsJSON,
+			&observationsJSON,
+			&actionItemsJSON,
 			&k.Category,
 			&tagsJSON,
+			&k.Importance,
+			&k.Sentiment,
 			&k.Source,
 			&k.AudioURL,
 			&k.SessionID,
@@ -309,6 +332,10 @@ func (d *Database) GetKnowledgeByCategory(category string) ([]Knowledge, error) 
 
 		json.Unmarshal([]byte(keyPointsJSON), &k.KeyPoints)
 		json.Unmarshal([]byte(tagsJSON), &k.Tags)
+		json.Unmarshal([]byte(entitiesJSON), &k.Entities)
+		json.Unmarshal([]byte(relationsJSON), &k.Relations)
+		json.Unmarshal([]byte(observationsJSON), &k.Observations)
+		json.Unmarshal([]byte(actionItemsJSON), &k.ActionItems)
 		json.Unmarshal([]byte(metadataJSON), &k.Metadata)
 
 		k.CreatedAt = time.Unix(createdAt, 0)
@@ -322,14 +349,14 @@ func (d *Database) GetKnowledgeByCategory(category string) ([]Knowledge, error) 
 
 // SearchKnowledge 搜索知识
 func (d *Database) SearchKnowledge(searchQuery string) ([]Knowledge, error) {
-	query := `SELECT id, COALESCE(title, '') as title, content, summary, key_points, category, tags, source, audio_url, session_id, created_at, updated_at, metadata
+	query := `SELECT id, COALESCE(title, '') as title, content, summary, key_points, COALESCE(entities, '{}') as entities, COALESCE(relations, '[]') as relations, COALESCE(observations, '[]') as observations, COALESCE(action_items, '[]') as action_items, category, tags, COALESCE(importance, 'medium') as importance, COALESCE(sentiment, 'neutral') as sentiment, source, audio_url, session_id, created_at, updated_at, metadata
 			  FROM knowledge
-			  WHERE content LIKE ? OR summary LIKE ? OR category LIKE ?
+			  WHERE content LIKE ? OR summary LIKE ? OR category LIKE ? OR title LIKE ?
 			  ORDER BY created_at DESC`
 
 	pattern := "%" + searchQuery + "%"
 
-	rows, err := d.db.Query(query, pattern, pattern, pattern)
+	rows, err := d.db.Query(query, pattern, pattern, pattern, pattern)
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +365,7 @@ func (d *Database) SearchKnowledge(searchQuery string) ([]Knowledge, error) {
 	var knowledges []Knowledge
 	for rows.Next() {
 		var k Knowledge
-		var keyPointsJSON, tagsJSON, metadataJSON string
+		var keyPointsJSON, tagsJSON, entitiesJSON, relationsJSON, observationsJSON, actionItemsJSON, metadataJSON string
 		var createdAt, updatedAt int64
 
 		err := rows.Scan(
@@ -347,8 +374,14 @@ func (d *Database) SearchKnowledge(searchQuery string) ([]Knowledge, error) {
 			&k.Content,
 			&k.Summary,
 			&keyPointsJSON,
+			&entitiesJSON,
+			&relationsJSON,
+			&observationsJSON,
+			&actionItemsJSON,
 			&k.Category,
 			&tagsJSON,
+			&k.Importance,
+			&k.Sentiment,
 			&k.Source,
 			&k.AudioURL,
 			&k.SessionID,
@@ -362,6 +395,10 @@ func (d *Database) SearchKnowledge(searchQuery string) ([]Knowledge, error) {
 
 		json.Unmarshal([]byte(keyPointsJSON), &k.KeyPoints)
 		json.Unmarshal([]byte(tagsJSON), &k.Tags)
+		json.Unmarshal([]byte(entitiesJSON), &k.Entities)
+		json.Unmarshal([]byte(relationsJSON), &k.Relations)
+		json.Unmarshal([]byte(observationsJSON), &k.Observations)
+		json.Unmarshal([]byte(actionItemsJSON), &k.ActionItems)
 		json.Unmarshal([]byte(metadataJSON), &k.Metadata)
 
 		k.CreatedAt = time.Unix(createdAt, 0)

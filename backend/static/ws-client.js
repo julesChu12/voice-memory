@@ -2,19 +2,26 @@
 // 负责音频采集、WebSocket 通信和状态管理
 
 class VoiceClient {
-    constructor(url, onStateChange, onTranscript, onAudio, onSpeechStart) {
+    constructor(url, onStateChange, onTranscript, onAudio, onSpeechStart, onAIResponse) {
         this.url = url;
         this.socket = null;
         this.audioContext = null;
         this.processor = null;
         this.mediaStream = null;
         this.isRecording = false;
+        this.isSpeaking = false; // Add isSpeaking property
+        
+        // VAD parameters
+        this.silenceThreshold = 0.03; // Increased noise threshold
+        this.silenceDuration = 3000; // 3 seconds of silence
+        this.silenceTimer = null;
         
         // 回调函数
         this.onStateChange = onStateChange || (() => {});
         this.onTranscript = onTranscript || (() => {});
         this.onAudio = onAudio || (() => {});
         this.onSpeechStart = onSpeechStart || (() => {});
+        this.onAIResponse = onAIResponse || (() => {});
     }
 
     // 连接 WebSocket
@@ -50,12 +57,14 @@ class VoiceClient {
     handleMessage(event) {
         if (event.data instanceof ArrayBuffer) {
             // 收到音频数据 (TTS)
+            console.log('<- [WS] 收到音频数据, 大小:', event.data.byteLength);
             this.onAudio(event.data);
             return;
         }
 
         try {
             const msg = JSON.parse(event.data);
+            console.log('<- [WS] 收到 JSON:', msg);
             switch (msg.type) {
                 case 'state':
                     this.onStateChange(msg.status);
@@ -63,6 +72,9 @@ class VoiceClient {
                 case 'stt_intermediate':
                 case 'stt_final':
                     this.onTranscript(msg.text, msg.type === 'stt_final');
+                    break;
+                case 'llm_reply':
+                    this.onAIResponse(msg.text);
                     break;
                 case 'error':
                     console.error('服务端错误:', msg.error);
@@ -78,7 +90,7 @@ class VoiceClient {
     async startRecording() {
         if (this.isRecording) return;
         
-        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+        if (!this.socket || this.socket.readyState === WebSocket.OPEN) {
             this.connect();
             // 等待连接建立... 简单起见这里先假设已连接或极快连接
             // 生产环境应该用 Promise 等待 onopen
@@ -100,33 +112,42 @@ class VoiceClient {
                 // 获取 PCM 数据 (Float32: -1.0 ~ 1.0)
                 const inputData = e.inputBuffer.getChannelData(0);
 
-                // --- 噪音门 (Noise Gate) ---
+                // --- 噪音门 (Noise Gate) & 静音检测 ---
                 let sum = 0;
                 for (let i = 0; i < inputData.length; i++) {
                     sum += inputData[i] * inputData[i];
                 }
                 const rms = Math.sqrt(sum / inputData.length);
                 
-                // 阈值设为 0.01 (可根据环境调整)
-                if (rms < 0.01) {
-                    this.isSpeaking = false;
-                    return; // 忽略噪音
+                if (rms > this.silenceThreshold) { // 检测到语音
+                    if (!this.isSpeaking) {
+                        this.isSpeaking = true;
+                        this.onSpeechStart();
+                        console.log('检测到语音开始');
+                    }
+                    clearTimeout(this.silenceTimer); // 清除静音计时器
+                    this.silenceTimer = null;
+                } else { // 检测到静音
+                    if (this.isSpeaking && this.silenceTimer === null) {
+                        // 如果正在说话，且静音计时器未启动，则启动计时器
+                        this.silenceTimer = setTimeout(() => {
+                            this.handleSilence();
+                        }, this.silenceDuration);
+                        console.log('检测到静音，启动计时器...');
+                    }
+                    this.isSpeaking = false; // 不再说话
                 }
                 
-                // 检测到语音开始
-                if (!this.isSpeaking) {
-                    this.isSpeaking = true;
-                    this.onSpeechStart();
-                }
-                // -------------------------
-                
-                // 转换为 Int16 PCM (百度 STT 需要)
-                const pcmData = this.floatTo16BitPCM(inputData);
-                
-                // 发送通过 WebSocket
-                if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-                    this.socket.send(pcmData);
-                }
+                // 如果是说话状态，发送音频
+                if (this.isSpeaking) {
+                    // 转换为 Int16 PCM (百度 STT 需要)
+                    const pcmData = this.floatTo16BitPCM(inputData);
+                    
+                                    // 发送通过 WebSocket
+                                    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                                        // console.log('-> [WS] 发送音频数据块, 大小:', pcmData.byteLength); // 频率太高，默认注释掉，需要时可打开
+                                        this.socket.send(pcmData);
+                                    }                }
             };
 
             source.connect(this.processor);
@@ -144,6 +165,9 @@ class VoiceClient {
     // 停止录音
     stopRecording() {
         this.isRecording = false;
+        this.isSpeaking = false;
+        clearTimeout(this.silenceTimer); // 清除静音计时器
+        this.silenceTimer = null;
         
         if (this.processor) {
             this.processor.disconnect();
@@ -162,6 +186,23 @@ class VoiceClient {
 
         // 发送停止信号(可选，目前服务端是基于包的，这可能用于告诉服务端这波说完了)
         // this.socket.send(JSON.stringify({type: "stop"}));
+        this.onStateChange('idle'); // Change state to idle after stopping
+    }
+
+    // 处理静音超时
+    handleSilence() {
+        console.log('静音超时，停止录音');
+        if (this.isRecording) {
+            this.stopRecording();
+        }
+    }
+
+    // 发送纯文本
+    sendText(text) {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+            this.socket.send(JSON.stringify({ type: 'text', text: text }));
+            this.onStateChange('processing');
+        }
     }
 
     // 发送打断信号

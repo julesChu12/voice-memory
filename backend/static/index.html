@@ -78,33 +78,38 @@
         </main>
 
         <!-- Controls Area -->
-        <div class="flex-shrink-0 mb-4">
+        <div class="flex-shrink-0 mb-4 space-y-4">
             
             <!-- Transcript Preview (Real-time) -->
-            <div id="transcriptPreview" class="h-12 mb-4 text-center text-slate-400 text-sm px-4 truncate transition-opacity opacity-0">
-                ...
+            <div id="transcriptPreview" class="h-6 text-center text-slate-400 text-sm px-4 truncate transition-opacity opacity-0">
+                正在听...
             </div>
 
-            <!-- Main Mic Button -->
-            <div class="flex justify-center items-center relative">
-                <!-- Pulse Ring (Active when recording) -->
-                <div id="pulseRing" class="absolute inset-0 bg-gradient-to-r from-red-500/50 to-orange-500/50 rounded-full blur-xl opacity-0 transform scale-75 transition-all duration-300"></div>
-                
-                <button id="recordBtn" class="relative z-10 w-20 h-20 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full shadow-lg flex items-center justify-center transition-transform hover:scale-105 active:scale-95 group border-4 border-slate-800">
-                    <i data-lucide="mic" class="w-8 h-8 text-white group-hover:text-white transition-colors" id="micIcon"></i>
+            <!-- Input Box & Mic -->
+            <div class="flex items-center gap-3 bg-slate-800/50 p-2 rounded-2xl border border-slate-700/50">
+                <!-- Mic Button (Small) -->
+                <button id="recordBtn" class="w-12 h-12 flex-shrink-0 bg-blue-600 rounded-xl flex items-center justify-center transition-all hover:bg-blue-500 active:scale-95 group relative">
+                    <div id="pulseRing" class="absolute inset-0 bg-blue-500 rounded-xl opacity-0"></div>
+                    <i data-lucide="mic" class="w-5 h-5 text-white relative z-10" id="micIcon"></i>
                 </button>
 
-                <!-- Interrupt Button (Visible when speaking) -->
-                <button id="interruptBtn" class="absolute right-10 top-1/2 -translate-y-1/2 hidden px-4 py-2 bg-red-500/20 text-red-400 border border-red-500/50 rounded-full text-xs font-medium hover:bg-red-500/30 transition-colors">
-                    ✋ 打断
+                <!-- Text Input -->
+                <input type="text" id="textInput" placeholder="输入消息..." class="flex-1 bg-transparent border-none focus:ring-0 text-slate-200 text-sm placeholder:text-slate-500 py-2" autocomplete="off">
+
+                <!-- Send Button -->
+                <button id="sendBtn" class="w-10 h-10 flex-shrink-0 text-slate-400 hover:text-blue-400 transition-colors">
+                    <i data-lucide="send" class="w-5 h-5"></i>
                 </button>
             </div>
 
-            <div class="text-center mt-4">
-                <p id="connectionStatus" class="text-xs text-slate-600">
-                    <span class="w-2 h-2 inline-block rounded-full bg-slate-500 mr-1" id="connDot"></span>
-                    <span id="connText">未连接</span>
+            <div class="flex justify-between items-center px-2">
+                <p id="connectionStatus" class="text-[10px] text-slate-600 uppercase tracking-widest">
+                    <span class="w-1.5 h-1.5 inline-block rounded-full bg-slate-500 mr-1" id="connDot"></span>
+                    <span id="connText">OFFLINE</span>
                 </p>
+                <button id="interruptBtn" class="hidden text-[10px] font-bold text-red-500/80 hover:text-red-400 transition-colors uppercase tracking-wider">
+                    Stop AI
+                </button>
             </div>
         </div>
 
@@ -120,6 +125,8 @@
 
         // DOM Elements
         const recordBtn = document.getElementById('recordBtn');
+        const textInput = document.getElementById('textInput');
+        const sendBtn = document.getElementById('sendBtn');
         const interruptBtn = document.getElementById('interruptBtn');
         const messagesDiv = document.getElementById('messages');
         const chatArea = document.getElementById('chatArea');
@@ -132,68 +139,58 @@
 
         // State
         let client = null;
-        let currentAiMessageDiv = null;
 
         // Helper: Scroll to bottom
         function scrollToBottom() {
-            chatArea.scrollTop = chatArea.scrollHeight;
+            chatArea.scrollTo({
+                top: chatArea.scrollHeight,
+                behavior: 'smooth'
+            });
         }
 
         // Helper: Create Message Bubble
         function appendMessage(role, text) {
             const div = document.createElement('div');
-            div.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+            div.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`;
             
             const bubble = document.createElement('div');
-            bubble.className = `max-w-[85%] p-3 rounded-2xl text-sm shadow-sm ${
+            bubble.className = `max-w-[85%] p-3 rounded-2xl text-sm shadow-sm leading-relaxed ${
                 role === 'user' 
                 ? 'rounded-tr-none bg-blue-600 text-white' 
-                : 'rounded-tl-none bg-slate-700/80 text-slate-200'
+                : 'rounded-tl-none bg-slate-700/80 text-slate-200 border border-slate-600/30'
             }`;
             bubble.textContent = text;
             
             div.appendChild(bubble);
             messagesDiv.appendChild(div);
             scrollToBottom();
-            return bubble; // Return for updating
+            return bubble;
         }
 
         // Helper: Update Status UI
         function updateStatusUI(status) {
-            statusIndicator.className = 'absolute bottom-4 left-1/2 transform -translate-x-1/2 px-4 py-2 bg-slate-900/90 border border-slate-600 rounded-full shadow-xl flex items-center gap-3 z-10 transition-all duration-300'; // Reset classes
-            
             switch (status) {
                 case 'connected':
-                    connDot.className = 'w-2 h-2 inline-block rounded-full bg-green-500 mr-1';
-                    connText.textContent = '已连接';
-                    statusIndicator.classList.add('hidden');
+                    connDot.className = 'w-1.5 h-1.5 inline-block rounded-full bg-green-500 mr-1';
+                    connText.textContent = 'Online';
                     break;
                 case 'disconnected':
                 case 'error':
-                    connDot.className = 'w-2 h-2 inline-block rounded-full bg-red-500 mr-1';
-                    connText.textContent = '连接断开';
-                    statusIndicator.classList.add('hidden');
-                    pulseRing.classList.remove('scale-150', 'opacity-100');
+                    connDot.className = 'w-1.5 h-1.5 inline-block rounded-full bg-red-500 mr-1';
+                    connText.textContent = 'Offline';
+                    pulseRing.classList.remove('animate-pulse', 'opacity-50', 'scale-125');
                     break;
                 case 'recording':
-                    pulseRing.classList.add('scale-150', 'opacity-50'); // Show pulse
-                    statusIndicator.classList.remove('hidden');
-                    statusIndicator.innerHTML = `
-                        <span class="relative flex h-3 w-3">
-                          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                          <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-                        </span>
-                        <span class="text-xs text-red-200 font-medium">正在聆听...</span>
-                    `;
+                    pulseRing.classList.add('animate-pulse', 'opacity-50', 'scale-125');
                     transcriptPreview.style.opacity = 1;
-                    transcriptPreview.textContent = "正在听...";
+                    transcriptPreview.textContent = "正在聆听...";
                     break;
                 case 'processing':
-                    pulseRing.classList.remove('scale-150', 'opacity-50');
+                    pulseRing.classList.remove('animate-pulse', 'opacity-50', 'scale-125');
                     statusIndicator.classList.remove('hidden');
                     statusIndicator.innerHTML = `
                         <i data-lucide="loader-2" class="w-4 h-4 animate-spin text-blue-400"></i>
-                        <span class="text-xs text-blue-200">思考中...</span>
+                        <span class="text-xs text-blue-200">AI 正在思考...</span>
                     `;
                     lucide.createIcons();
                     break;
@@ -203,18 +200,28 @@
                         <div class="speaking-wave">
                             <span></span><span></span><span></span><span></span><span></span>
                         </div>
-                        <span class="text-xs text-purple-200">正在回答</span>
+                        <span class="text-xs text-purple-200">正在回答...</span>
                     `;
-                    interruptBtn.classList.remove('hidden'); // Show interrupt button
+                    interruptBtn.classList.remove('hidden');
                     break;
                 case 'idle':
-                    pulseRing.classList.remove('scale-150', 'opacity-50');
+                    pulseRing.classList.remove('animate-pulse', 'opacity-50', 'scale-125');
                     statusIndicator.classList.add('hidden');
                     interruptBtn.classList.add('hidden');
                     transcriptPreview.style.opacity = 0;
-                    currentAiMessageDiv = null;
+                    micIcon.classList.remove('text-red-400');
                     break;
             }
+        }
+
+        // Handle Text Send
+        function handleTextSend() {
+            const text = textInput.value.trim();
+            if (!text || !client) return;
+            
+            appendMessage('user', text);
+            client.sendText(text);
+            textInput.value = '';
         }
 
         // Initialize Client
@@ -224,80 +231,51 @@
 
             client = new VoiceClient(
                 wsUrl,
-                (status) => {
-                    console.log('Status:', status);
-                    updateStatusUI(status);
-                },
+                updateStatusUI,
                 (text, isFinal) => {
                     // Handle Transcript
-                    transcriptPreview.textContent = text;
                     if (isFinal) {
                         appendMessage('user', text);
+                        transcriptPreview.style.opacity = 0;
+                    } else {
+                        transcriptPreview.textContent = text;
+                        transcriptPreview.style.opacity = 1;
                     }
                 },
                 (audioData) => {
-                    // Handle Audio (TTS)
-                    console.log('收到音频数据:', audioData.byteLength);
-                    
-                    // Create Blob and play
-                    const blob = new Blob([audioData], { type: 'audio/mp3' }); // Baidu usually returns MP3
-                    const url = URL.createObjectURL(blob);
-                    
-                    // Create AI message bubble if not exists
-                    if (!currentAiMessageDiv) {
-                        currentAiMessageDiv = appendMessage('assistant', '🔊 [正在播放语音...]');
-                    }
-                    
-                    const audio = new Audio(url);
-                    audio.className = 'tts-audio'; // Add class for selection
-                    audio.onended = () => {
-                        URL.revokeObjectURL(url);
-                        // client.onStateChange('idle'); // Handled by server state or auto
-                    };
-                    audio.play().catch(e => console.error('播放失败:', e));
+                    console.log('Audio received:', audioData.byteLength);
                 },
                 () => {
-                    // onSpeechStart: Stop any playing audio immediately
-                    console.log('检测到用户说话，停止 TTS');
-                    const audios = document.getElementsByClassName('tts-audio');
-                    for(let a of audios) {
-                        a.pause();
-                        a.currentTime = 0;
-                    }
-                    // Optional: Send explicit interrupt to server (handled by audio stream anyway)
+                    console.log('Speech detected');
+                },
+                (text) => {
+                    appendMessage('assistant', text);
                 }
             );
             
             client.connect();
         }
 
-        // Initialize on load
+        // Event Listeners
         window.addEventListener('load', initClient);
 
-        // Record Button Logic (Toggle)
         recordBtn.addEventListener('click', () => {
             if (!client) return;
-
             if (client.isRecording) {
                 client.stopRecording();
-                micIcon.classList.remove('text-red-500'); 
             } else {
                 client.startRecording();
-                micIcon.classList.add('text-red-500');
+                micIcon.classList.add('text-red-400');
             }
         });
 
-        // Interrupt Button
+        sendBtn.addEventListener('click', handleTextSend);
+        textInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handleTextSend();
+        });
+
         interruptBtn.addEventListener('click', () => {
-            if (client) {
-                client.interrupt();
-                // Stop any playing audio
-                const audios = document.getElementsByTagName('audio');
-                for(let a of audios) {
-                    a.pause();
-                    a.currentTime = 0;
-                }
-            }
+            if (client) client.interrupt();
         });
 
     </script>

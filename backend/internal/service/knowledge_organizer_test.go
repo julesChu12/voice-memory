@@ -3,238 +3,196 @@ package service
 import (
 	"fmt"
 	"testing"
-	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
-// TestGenerateTitleFromSession 测试根据会话生成标题
-func TestGenerateTitleFromSession(t *testing.T) {
-	// 跳过实际 API 调用测试（需要 API key）
-	t.Skip("需要 GLM API key，跳过实际 API 测试")
+// MockLLMService 模拟 LLM 服务
+type MockLLMService struct {
+	MockSendMessage func(req ChatRequest) (*ChatResponse, error)
+}
 
-	// 创建 GLM 客户端（使用环境变量或测试 key）
-	apiKey := "test_key"
-	glmClient := NewGLMClient(apiKey)
-	organizer := NewKnowledgeOrganizer(glmClient)
+func (m *MockLLMService) SendMessage(req ChatRequest) (*ChatResponse, error) {
+	if m.MockSendMessage != nil {
+		return m.MockSendMessage(req)
+	}
+	return nil, fmt.Errorf("MockSendMessage not implemented")
+}
 
-	// 创建测试会话 - 关于技术讨论的对话
+func (m *MockLLMService) SendMessageStream(req ChatRequest, callback func(StreamChunk)) error {
+	// Dummy implementation for interface satisfaction
+	return nil
+}
+
+// TestOrganizeV2 tests the v2.0 knowledge organization prompt and parsing logic
+func TestOrganizeV2(t *testing.T) {
+	// 1. Prepare the mock response
+	mockResponseJSON := `{
+		"summary": "使用 Go gin 框架重构高 QPS 用户服务",
+		"key_points": [
+			"gin 框架性能优于 Python FastAPI",
+			"当前用户服务 QPS 5000，需要重构"
+		],
+		"entities": {
+			"people": [],
+			"products": ["gin", "GORM", "FastAPI"],
+			"companies": [],
+			"locations": [],
+			"concepts": ["QPS", "API服务", "重构"]
+		},
+		"category": "technology",
+		"tags": ["Go", "gin", "性能优化"],
+		"relations": [
+			{
+				"type": "contrasts_with",
+				"target": "Python FastAPI",
+				"context": "gin 性能优于 FastAPI"
+			}
+		],
+		"observations": [
+			{
+				"category": "decision",
+				"content": "使用 Go gin 框架重构用户服务",
+				"context": "QPS 5000 性能瓶颈"
+			}
+		],
+		"sentiment": "positive",
+		"importance": "high",
+		"action_items": [
+			"搭建 gin + GORM 项目框架",
+			"进行性能压测对比"
+		]
+	}`
+
+	mockChatResponse := &ChatResponse{
+		Type: "message",
+		Content: []Content{
+			{
+				Type: "text",
+				Text: mockResponseJSON,
+			},
+		},
+	}
+
+	// 2. Setup the mock service
+	mockLLM := &MockLLMService{
+		MockSendMessage: func(req ChatRequest) (*ChatResponse, error) {
+			return mockChatResponse, nil
+		},
+	}
+
+	// 3. Create the organizer with the mock service
+	organizer := NewKnowledgeOrganizer(mockLLM)
+
+	// 4. Call the Organize function
+	result, err := organizer.Organize("some test content")
+
+	// 5. Assert the results
+	assert.NoError(t, err, "Organize function should not return an error")
+	assert.NotNil(t, result, "Result should not be nil")
+
+	assert.Equal(t, "使用 Go gin 框架重构高 QPS 用户服务", result.Summary)
+	assert.Len(t, result.KeyPoints, 2)
+	assert.Equal(t, "gin 框架性能优于 Python FastAPI", result.KeyPoints[0])
+
+	// Assert Entities
+	assert.Contains(t, result.Entities.Products, "gin")
+	assert.Contains(t, result.Entities.Concepts, "QPS")
+	assert.Empty(t, result.Entities.People)
+
+	// Assert Category and Tags
+	assert.Equal(t, "technology", result.Category)
+	assert.Len(t, result.Tags, 3)
+	assert.Contains(t, result.Tags, "Go")
+
+	// Assert new V2 fields
+	assert.Len(t, result.Relations, 1)
+	assert.Equal(t, "contrasts_with", result.Relations[0].Type)
+	assert.Equal(t, "Python FastAPI", result.Relations[0].Target)
+
+	assert.Len(t, result.Observations, 1)
+	assert.Equal(t, "decision", result.Observations[0].Category)
+	assert.Equal(t, "使用 Go gin 框架重构用户服务", result.Observations[0].Content)
+
+	assert.Len(t, result.ActionItems, 2)
+	assert.Equal(t, "搭建 gin + GORM 项目框架", result.ActionItems[0])
+
+	// Assert other fields
+	assert.Equal(t, "positive", result.Sentiment)
+	assert.Equal(t, "high", result.Importance)
+}
+
+// TestOrganizeJSONErrorHandling tests the fallback mechanism when JSON parsing fails
+func TestOrganizeJSONErrorHandling(t *testing.T) {
+	// 1. Prepare a malformed JSON response
+	mockResponseJSON := `{"summary": "this is not valid json`
+
+	mockChatResponse := &ChatResponse{
+		Content: []Content{{Type: "text", Text: mockResponseJSON}},
+	}
+
+	// 2. Setup the mock service
+	mockLLM := &MockLLMService{
+		MockSendMessage: func(req ChatRequest) (*ChatResponse, error) {
+			return mockChatResponse, nil
+		},
+	}
+
+	// 3. Create the organizer
+	organizer := NewKnowledgeOrganizer(mockLLM)
+
+	// 4. Call the function
+	testContent := "this is the original content"
+	result, err := organizer.Organize(testContent)
+
+	// 5. Assert the fallback behavior
+	assert.NoError(t, err, "Error should be nil on JSON parsing failure as it has a fallback")
+	assert.NotNil(t, result, "Result should not be nil")
+	assert.Equal(t, testContent[:min(len(testContent), 30)], result.Summary, "Summary should be a snippet of original content")
+	assert.Equal(t, "想法", result.Category, "Category should be the default")
+	assert.Empty(t, result.KeyPoints)
+	assert.Empty(t, result.Relations)
+	assert.Empty(t, result.Observations)
+}
+
+// TestGenerateTitleFromSession_Mock tests title generation with a mock
+func TestGenerateTitleFromSession_Mock(t *testing.T) {
+	// 1. Mock response
+	mockChatResponse := &ChatResponse{
+		Type:    "message",
+		Content: []Content{{Type: "text", Text: "Go框架并发编程"}},
+	}
+
+	// 2. Mock service
+	mockLLM := &MockLLMService{
+		MockSendMessage: func(req ChatRequest) (*ChatResponse, error) {
+			// You could add assertions here about the request prompt if needed
+			return mockChatResponse, nil
+		},
+	}
+
+	// 3. Organizer
+	organizer := NewKnowledgeOrganizer(mockLLM)
+
+	// 4. Test session
 	session := &Session{
 		ID: "test_session_001",
 		Messages: []Message{
-			{Role: "user", Content: "Go 语言有什么优点？"},
-			{Role: "assistant", Content: "Go 语言有以下优点：\n1. 简单易学，语法清晰\n2. 并发支持好，有 goroutine\n3. 性能优秀，接近 C 语言\n4. 跨平台支持好"},
-			{Role: "user", Content: "goroutine 是什么？"},
-			{Role: "assistant", Content: "goroutine 是 Go 的轻量级线程，由 Go 运行时管理。可以轻松创建成千上万个并发任务。"},
-			{Role: "user", Content: "和普通线程有什么区别？"},
-			{Role: "assistant", Content: "主要区别：\n1. 更轻量，栈空间只有 2KB\n2. 由 Go runtime 调度，不是 OS 调度\n3. 通信用 channel，避免共享内存"},
+			{Role: "user", Content: "我们来聊聊Go的并发"},
+			{Role: "assistant", Content: "好呀，goroutine和channel是核心..."},
 		},
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+
 	}
 
-	// 生成标题
+	// 5. Generate title
 	title, err := organizer.GenerateTitleFromSession(session)
-	if err != nil {
-		t.Fatalf("生成标题失败: %v", err)
-	}
 
-	// 验证标题不为空
-	if title == "" {
-		t.Error("标题不应为空")
-	}
-
-	// 验证标题长度合理（5-15 字符）
-	if len(title) < 5 || len(title) > 20 {
-		t.Errorf("标题长度应在 5-20 字符之间，得到: %d (%s)", len(title), title)
-	}
-
-	t.Logf("生成的标题: %s", title)
+	// 6. Assert
+	assert.NoError(t, err)
+	assert.Equal(t, "Go框架并发编程", title)
 }
 
-// TestOrganizeWithSessionContent 测试基于完整会话内容生成摘要
-func TestOrganizeWithSessionContent(t *testing.T) {
-	// 跳过实际 API 调用测试（需要 API key）
-	t.Skip("需要 GLM API key，跳过实际 API 测试")
-
-	apiKey := "test_key"
-	glmClient := NewGLMClient(apiKey)
-	organizer := NewKnowledgeOrganizer(glmClient)
-
-	// 构建完整对话内容（模拟会话历史）
-	conversationText := `1. 用户: 给我讲解一下关于汾酒的知识把
-2. AI助手: 哈，我这里关于汾酒的知识库内容不多呢~ 不过我知道汾酒是中国老八大名酒之一，清香型白酒的代表，有4000多年历史呢！
-3. 用户: 从头给我讲讲把
-4. AI助手: 哈哈，汾酒的故事要从4000多年前说起啦！它是清香型白酒鼻祖，产自山西杏花村。名字源于"汾河"，用高粱、豌豆等发酵，口感清冽甘爽，还被誉为"国酒"哦！
-5. 用户: 继续
-6. AI助手: 汾酒的传统工艺可是宝贝呢！地缸发酵、清蒸清烧，不沾杂味。蒸馏时酒香四溢，陈酿后口感更醇厚。最特别的是它的"一清到底"，喝起来清爽不辣喉~
-7. 用户: 好的
-8. AI助手: 哈哈，"好的"重复啦～看来你很期待呀！
-9. 用户: 最高端的是什么？
-10. AI助手: 汾酒的高端系列是"青花汾酒"，特别是30年、40年陈酿！
-11. 用户: 分别是什么价格？
-12. AI助手: 青花30年大约800-1200元，40年要2000-3000元以上呢！`
-
-	// 生成摘要
-	result, err := organizer.Organize(conversationText)
-	if err != nil {
-		t.Fatalf("生成摘要失败: %v", err)
-	}
-
-	// 验证摘要
-	if result.Summary == "" {
-		t.Error("摘要不应为空")
-	}
-	if len(result.Summary) > 50 {
-		t.Errorf("摘要应简洁，当前长度: %d", len(result.Summary))
-	}
-
-	// 验证关键点
-	if len(result.KeyPoints) == 0 {
-		t.Error("应提取关键点")
-	}
-
-	// 验证分类
-	validCategories := []string{"技术", "生活", "工作", "学习", "想法"}
-	categoryValid := false
-	for _, cat := range validCategories {
-		if result.Category == cat {
-			categoryValid = true
-			break
-		}
-	}
-	if !categoryValid {
-		t.Errorf("分类无效: %s", result.Category)
-	}
-
-	t.Logf("摘要: %s", result.Summary)
-	t.Logf("分类: %s", result.Category)
-	t.Logf("关键点: %v", result.KeyPoints)
-	t.Logf("标签: %v", result.Tags)
+// Just a dummy test to make sure file is not empty if all tests are skipped
+func TestPlaceholder(t *testing.T) {
+	assert.True(t, true)
 }
-
-// TestOrganizeSingleMessage 测试单条消息的摘要生成
-func TestOrganizeSingleMessage(t *testing.T) {
-	// 跳过实际 API 调用测试（需要 API key）
-	t.Skip("需要 GLM API key，跳过实际 API 测试")
-
-	apiKey := "test_key"
-	glmClient := NewGLMClient(apiKey)
-	organizer := NewKnowledgeOrganizer(glmClient)
-
-	// 单条文本
-	text := "今天天气真不错，适合出去散步"
-
-	result, err := organizer.Organize(text)
-	if err != nil {
-		t.Fatalf("生成摘要失败: %v", err)
-	}
-
-	if result.Summary == "" {
-		t.Error("摘要不应为空")
-	}
-
-	t.Logf("单条消息摘要: %s", result.Summary)
-	t.Logf("分类: %s", result.Category)
-}
-
-// TestKnowledgeOrganizerMock 测试知识整理器的结构（不调用 API）
-func TestKnowledgeOrganizerMock(t *testing.T) {
-	apiKey := "test_key"
-	glmClient := NewGLMClient(apiKey)
-	organizer := NewKnowledgeOrganizer(glmClient)
-
-	if organizer == nil {
-		t.Fatal("KnowledgeOrganizer 创建失败")
-	}
-	if organizer.glmClient == nil {
-		t.Error("GLMClient 未初始化")
-	}
-}
-
-// TestGenerateTitleFromSession_Mock 测试标题生成逻辑（不调用 API）
-func TestGenerateTitleFromSession_Mock(t *testing.T) {
-	// 这个测试验证会话结构的正确性，不实际调用 API
-	session := &Session{
-		ID: "test_session",
-		Messages: []Message{
-			{Role: "user", Content: "什么是 Go 语言？"},
-			{Role: "assistant", Content: "Go 是 Google 开发的开源编程语言"},
-			{Role: "user", Content: "它有什么特点？"},
-		},
-	}
-
-	// 验证会话结构
-	if session.ID != "test_session" {
-		t.Errorf("会话 ID 不匹配")
-	}
-	if len(session.Messages) != 3 {
-		t.Errorf("期望 3 条消息，得到 %d", len(session.Messages))
-	}
-
-	// 验证消息角色
-	if session.Messages[0].Role != "user" {
-		t.Errorf("第一条消息角色应为 user")
-	}
-	if session.Messages[1].Role != "assistant" {
-		t.Errorf("第二条消息角色应为 assistant")
-	}
-}
-
-// TestBuildConversationText 测试对话文本构建逻辑
-func TestBuildConversationText(t *testing.T) {
-	session := &Session{
-		ID: "test_session",
-		Messages: []Message{
-			{Role: "user", Content: "你好"},
-			{Role: "assistant", Content: "你好呀"},
-			{Role: "user", Content: "再见"},
-		},
-	}
-
-	// 构建对话文本
-	var conversationText string
-	for i, msg := range session.Messages {
-		role := "用户"
-		if msg.Role == "assistant" {
-			role = "AI助手"
-		}
-		conversationText += fmt.Sprintf("%d. %s: %s\n", i+1, role, msg.Content)
-	}
-
-	// 验证构建结果
-	if conversationText == "" {
-		t.Error("对话文本不应为空")
-	}
-
-	// 验证包含所有消息
-	expectedLines := 3
-	actualLines := 0
-	for _, msg := range session.Messages {
-		content := fmt.Sprintf("%v", msg.Content)
-		if testIndexOf(conversationText, content) >= 0 {
-			actualLines++
-		}
-	}
-	if actualLines != expectedLines {
-		t.Errorf("期望包含 %d 条消息内容，实际包含 %d 条", expectedLines, actualLines)
-	}
-
-	t.Logf("构建的对话文本:\n%s", conversationText)
-}
-
-// testIndexOf 辅助函数：查找子串位置
-func testIndexOf(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		match := true
-		for j := 0; j < len(substr); j++ {
-			if s[i+j] != substr[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return i
-		}
-	}
-	return -1
-}
-

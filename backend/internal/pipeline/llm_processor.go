@@ -29,20 +29,14 @@ func (p *LLMProcessor) Process(ctx *PipelineContext) (bool, error) {
 		return false, fmt.Errorf("transcript is empty, nothing to ask LLM")
 	}
 
-	// 1. 获取历史消息
-	history := p.sessionManager.GetMessages(ctx.SessionID)
+	// 1. 立即保存用户消息 (防止 LLM 失败导致数据丢失)
+	p.sessionManager.AddMessage(ctx.SessionID, "user", ctx.Transcript)
 
-	// 2. 构造当前请求消息
-	currentMsg := service.Message{
-		Role:    "user",
-		Content: ctx.Transcript,
-	}
+	// 2. 获取包含最新消息的历史记录
+	// 这里获取到的 messages 已经包含了刚刚存入的 user message
+	allMessages := p.sessionManager.GetMessages(ctx.SessionID)
 
-	// 3. 组装所有消息 (这里可以注入 System Prompt)
-	// TODO: 可以在此处引入 PromptAssembler 优化
-	allMessages := append(history, currentMsg)
-
-	// 4. 调用流式接口，但在内部累加结果（目前是 Block Mode）
+	// 3. 调用流式接口
 	var fullReply strings.Builder
 	
 	req := service.ChatRequest{
@@ -72,8 +66,7 @@ func (p *LLMProcessor) Process(ctx *PipelineContext) (bool, error) {
 	reply := fullReply.String()
 	ctx.LLMReply = reply
 
-	// 5. 将对话存入会话管理器
-	p.sessionManager.AddMessage(ctx.SessionID, "user", ctx.Transcript)
+	// 4. 将 AI 回复存入会话管理器
 	p.sessionManager.AddMessage(ctx.SessionID, "assistant", reply)
 
 	log.Printf("[LLM] 生成回复完毕 (长度: %d)", len(reply))

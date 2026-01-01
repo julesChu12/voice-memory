@@ -7,6 +7,8 @@ type STTService interface {
 
 // LLMService 大语言模型服务接口
 type LLMService interface {
+	// SendMessage 发送消息（非流式）
+	SendMessage(req ChatRequest) (*ChatResponse, error)
 	// SendMessageStream 流式发送消息
 	// callback: 每收到一个 chunk 就回调一次
 	SendMessageStream(req ChatRequest, callback func(StreamChunk)) error

@@ -25,6 +25,11 @@ func (p *STTProcessor) Name() string {
 }
 
 func (p *STTProcessor) Process(ctx *PipelineContext) (bool, error) {
+	// 如果已经有文本了（例如纯文本输入场景），直接跳过 STT
+	if ctx.Transcript != "" {
+		return true, nil
+	}
+
 	if len(ctx.InputAudio) == 0 {
 		return false, fmt.Errorf("input audio is empty")
 	}

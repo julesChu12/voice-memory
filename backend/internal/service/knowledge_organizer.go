@@ -7,104 +7,92 @@ import (
 
 // KnowledgeOrganizer 知识整理器
 type KnowledgeOrganizer struct {
-	glmClient *GLMClient
+	llmService LLMService
 }
 
 // NewKnowledgeOrganizer 创建知识整理器
-func NewKnowledgeOrganizer(glmClient *GLMClient) *KnowledgeOrganizer {
+func NewKnowledgeOrganizer(llmService LLMService) *KnowledgeOrganizer {
 	return &KnowledgeOrganizer{
-		glmClient: glmClient,
+		llmService: llmService,
 	}
 }
 
-// Organize 自动整理知识内容 (v1.0 improved)
+// Organize 自动整理知识内容 (v2.0 - 关系增强)
 func (o *KnowledgeOrganizer) Organize(content string) (*KnowledgeOrganizeResult, error) {
-	systemPrompt := `你是 Voice Memory 的知识整理助手，负责将对话内容转化为结构化、可检索的知识条目。
+	systemPrompt := `你是 Voice Memory 的知识整理助手，负责创建结构化的语义知识图谱。
 
-【核心任务】从完整对话中提取核心信息，创建易于检索的知识记录。
+【核心任务】将对话转化为知识条目，提取实体、关系和上下文，构建可连接的知识网络。
 
 【输出格式】JSON：
 {
-  "summary": "核心要点摘要（30字以内，一句话概括主题）",
-  "key_points": [
-    "关键点1（具体、可操作的信息）",
-    "关键点2（数据、结论或建议）",
-    "关键点3（重要细节或注意事项）"
-  ],
+  "summary": "核心要点（30字以内）",
+  "key_points": ["关键点1", "关键点2"],
   "entities": {
-    "people": ["人名1", "人名2"],
-    "products": ["产品名1", "工具名2", "框架名3"],
-    "companies": ["公司名1", "品牌名2"],
-    "locations": ["地点1", "地区2"]
+    "people": ["人名"],
+    "products": ["产品/工具"],
+    "companies": ["公司/品牌"],
+    "locations": ["地点"],
+    "concepts": ["概念/术语"]
   },
-  "category": "分类（见下方分类体系）",
-  "tags": ["标签1", "标签2", "标签3"],
+  "category": "分类",
+  "tags": ["标签1", "标签2"],
+  "relations": [
+    {
+      "type": "relates_to|requires|implements|improves|contrasts_with",
+      "target": "相关实体或概念",
+      "context": "关系说明"
+    }
+  ],
+  "observations": [
+    {
+      "category": "fact|decision|preference|technique|question",
+      "content": "观察内容",
+      "context": "上下文"
+    }
+  ],
+  "sentiment": "positive/neutral/negative",
   "importance": "high/medium/low",
-  "sentiment": "positive/neutral/negative"
+  "action_items": ["可能的行动项1", "行动项2"]
 }
 
-【分类体系 - 二级分类】
+【关系类型定义】
+- **relates_to**: 一般关联，主题相关
+- **requires**: 依赖关系，需要X才能Y
+- **implements**: 实现关系，Y是X的具体实现
+- **improves**: 改进关系，Y是对X的优化
+- **contrasts_with**: 对比关系，Y与X形成对比
+- **part_of**: 包含关系，Y是X的一部分
+- **inspired_by**: 灵感来源，Y受X启发
+- **alternative_to**: 替代关系，Y可替代X
 
-### 技术 (technology)
-- 编程开发 (coding): 编程语言、算法、代码实现
-- 架构设计 (architecture): 系统架构、设计模式、技术选型
-- 开发工具 (tools): IDE、框架、库、开发环境
-- 运维部署 (devops): CI/CD、容器、云服务、监控
-- 技术方案 (solution): 具体问题的技术解决方案
+【观察类型分类】
+- **fact**: 事实、数据、信息
+- **decision**: 决策、选择、决定
+- **preference**: 偏好、喜好、习惯
+- **technique**: 技术、方法、技巧
+- **question**: 问题、疑问、未解决
 
-### 生活 (life)
-- 健康养生 (health): 运动、医疗、饮食、作息
-- 购物消费 (shopping): 产品对比、价格、购买决策
-- 美食烹饪 (food): 菜谱、餐厅、营养、食材
-- 旅行出行 (travel): 景点、交通、住宿、行程
-- 生活技巧 (tips): 生活小妙招、经验总结
+【实体增强 - 概念提取】
+- 提取专业术语、技术概念、业务名词
+- 用于构建知识图谱的核心节点
+- 例如："微服务"、"CI/CD","敏捷开发"
 
-### 工作 (work)
-- 会议记录 (meeting): 会议内容、决策、行动项
-- 项目管理 (project): 项目进展、里程碑、风险管理
-- 任务计划 (task): 待办事项、提醒、目标
-- 职业发展 (career): 求职、技能提升、职业规划
-- 工作决策 (decision): 工作相关的选择和判断
+【关系构建原则】
+- 引用对话中明确提及的相关实体
+- 推测隐含的关联关系
+- 创建前向引用（可能尚未存在的实体）
+- 双向关系优先（如果A与B相关，B也与A相关）
 
-### 学习 (learning)
-- 学习笔记 (note): 知识总结、概念理解
-- 教程指南 (tutorial): 操作步骤、how-to、入门指南
-- 学习资源 (resource): 书籍、课程、文档、链接
-- 问题答疑 (qa): 疑难点、常见错误、易错点
-- 考试考证 (exam): 考试准备、知识点、复习策略
+【观察提取原则】
+- 每条观察独立、语义完整
+- 包含类型标记，便于后续查询
+- 添加上下文说明，理解更准确
+- 最多 7 条观察，按相关性排序
 
-### 想法 (thought)
-- 灵感创意 (inspiration): 创意点子、灵感记录
-- 思考总结 (reflection): 复盘、反思、感悟
-- 目标计划 (goal): 目标设定、计划安排
-- 观点看法 (opinion): 对某事的评价、观点
-
-【实体提取规则】
-- 人名: 真实人名、昵称、角色
-- 产品: 软件、硬件、工具、框架、库
-- 公司: 企业、品牌、组织、机构
-- 地点: 城市、国家、地址、场所
-
-【关键点提取标准】
-- 每个关键点应该：独立、具体、有价值
-- 优先提取：数据、结论、建议、操作步骤
-- 避免泛泛而谈，要具体可执行
-- 最多 5 个关键点，按重要性排序
-
-【标签生成原则】
-- 3-5 个标签，覆盖核心主题
-- 包含：实体名、二级分类、关键属性
-- 使用简短词语（2-4 字）
-
-【重要性判断】
-- high: 重要决策、关键数据、高价值信息
-- medium: 有用知识、经验总结
-- low: 随手记录、临时信息
-
-【情感判断】
-- positive: 积极、正面、满意、成功
-- neutral: 中性、客观、事实陈述
-- negative: 消极、问题、失败、抱怨`
+【行动项提取】
+- 提取对话中的待办事项
+- 明确下一步行动
+- 可选字段，非必要`
 
 	messages := []Message{
 		{
@@ -115,12 +103,12 @@ func (o *KnowledgeOrganizer) Organize(content string) (*KnowledgeOrganizeResult,
 
 	req := ChatRequest{
 		Model:       "glm-4-flash", // 使用快速模型
-		MaxTokens:   512,
+		MaxTokens:   1024,          // 增加 Token 数量以适应更复杂的输出
 		Messages:    messages,
-		Temperature: 0.3, // 低温度，更稳定
+		Temperature: 0.2, // 更低的温度，确保结构化输出的稳定性
 	}
 
-	resp, err := o.glmClient.SendMessage(req)
+	resp, err := o.llmService.SendMessage(req)
 	if err != nil {
 		return nil, fmt.Errorf("AI 整理失败: %w", err)
 	}
@@ -135,10 +123,8 @@ func (o *KnowledgeOrganizer) Organize(content string) (*KnowledgeOrganizeResult,
 	if err := json.Unmarshal([]byte(reply), &result); err != nil {
 		// 如果解析失败，返回基础整理
 		return &KnowledgeOrganizeResult{
-			Summary:   content[:min(len(content), 20)],
-			KeyPoints: []string{},
+			Summary:   content[:min(len(content), 30)],
 			Category:  "想法",
-			Tags:      []string{},
 		}, nil
 	}
 
@@ -281,7 +267,7 @@ func (o *KnowledgeOrganizer) GenerateTitleFromSession(session *Session) (string,
 		Temperature: 0.3,
 	}
 
-	resp, err := o.glmClient.SendMessage(req)
+	resp, err := o.llmService.SendMessage(req)
 	if err != nil {
 		return "", fmt.Errorf("AI 生成标题失败: %w", err)
 	}
