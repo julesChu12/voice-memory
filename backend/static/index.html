@@ -249,11 +249,22 @@
                     }
                     
                     const audio = new Audio(url);
+                    audio.className = 'tts-audio'; // Add class for selection
                     audio.onended = () => {
                         URL.revokeObjectURL(url);
                         // client.onStateChange('idle'); // Handled by server state or auto
                     };
                     audio.play().catch(e => console.error('播放失败:', e));
+                },
+                () => {
+                    // onSpeechStart: Stop any playing audio immediately
+                    console.log('检测到用户说话，停止 TTS');
+                    const audios = document.getElementsByClassName('tts-audio');
+                    for(let a of audios) {
+                        a.pause();
+                        a.currentTime = 0;
+                    }
+                    // Optional: Send explicit interrupt to server (handled by audio stream anyway)
                 }
             );
             

@@ -60,7 +60,7 @@ func New(cfg *config.Config) (*Server, error) {
 	knowledgeHandler := handler.NewKnowledgeHandler(sttService, knowledgeOrganizer, database, audioDir)
 	knowledgeHandler.SetRAGService(ragService)
 	sessionHandler := handler.NewSessionHandler(sessionManager)
-	tsHandler := handler.NewTTSHandler(ttsService)
+	ttsHandler := handler.NewTTSHandler(ttsService)
 	
 	// WebSocket 处理器 (核心)
 	wsHandler := handler.NewWSHandler(

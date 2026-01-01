@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"voice-memory/internal/pipeline"
@@ -81,6 +82,22 @@ func (h *WSHandler) HandleWS(c *gin.Context) {
 	)
 
 	// 4. 循环读取
+	var (
+		currentCancel context.CancelFunc
+		mu            sync.Mutex
+	)
+
+	// 辅助函数：取消当前正在进行的任务
+	cancelCurrent := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if currentCancel != nil {
+			currentCancel()
+			currentCancel = nil
+			log.Printf("[WS] 已触发打断，取消上一个任务")
+		}
+	}
+
 	for {
 		messageType, data, err := conn.ReadMessage()
 		if err != nil {
@@ -91,46 +108,78 @@ func (h *WSHandler) HandleWS(c *gin.Context) {
 		// 处理不同类型的消息
 		switch messageType {
 		case websocket.BinaryMessage:
-			// 收到音频包 -> 执行 Pipeline
-			handleAudio(conn, pipe, sessionID, data)
+			// 1. 收到新语音 -> 立即打断上一个
+			cancelCurrent()
+
+			// 2. 创建新上下文
+			mu.Lock()
+			ctx, cancel := context.WithCancel(context.Background())
+			currentCancel = cancel
+			mu.Unlock()
+
+			// 3. 异步执行 Pipeline (关键修复：必须是 go routine)
+			go func(ctx context.Context, audioData []byte) {
+				// 确保任务结束时清理 cancel
+				defer func() {
+					mu.Lock()
+					// 只有当 currentCancel 还是自己时才置空（避免把后来者的 cancel 搞丢）
+					// 这里简单处理，依赖 GC，或者可以不置空，只要逻辑正确
+					mu.Unlock()
+				}()
+				
+				handleAudio(ctx, conn, pipe, sessionID, audioData)
+			}(ctx, data)
 
 		case websocket.TextMessage:
-			// 收到文本指令 (如 config, interrupt)
-			log.Printf("[WS] 收到文本消息: %s", string(data))
+			// 收到文本指令 (如 interrupt)
+			msg := string(data)
+			if msg == `{"type":"interrupt"}` || msg == "interrupt" {
+				cancelCurrent()
+				sendJSON(conn, "state", "idle") // 告诉前端已重置
+			}
+			log.Printf("[WS] 收到文本消息: %s", msg)
 		}
 	}
 }
 
 // handleAudio 处理音频输入
-func handleAudio(conn *websocket.Conn, pipe *pipeline.Pipeline, sessionID string, audioData []byte) {
+func handleAudio(ctx context.Context, conn *websocket.Conn, pipe *pipeline.Pipeline, sessionID string, audioData []byte) {
 	// 通知客户端：收到音频，开始思考
 	sendJSON(conn, "state", "processing")
 
-	// 创建 Pipeline 上下文
-	ctx := pipeline.NewPipelineContext(context.Background(), sessionID)
-	ctx.InputAudio = audioData
+	// 创建 Pipeline 上下文 (使用传入的可取消 Context)
+	pCtx := pipeline.NewPipelineContext(ctx, sessionID)
+	pCtx.InputAudio = audioData
 
 	// 执行流水线
-	if err := pipe.Execute(ctx); err != nil {
+	if err := pipe.Execute(pCtx); err != nil {
+		// 如果是 context canceled，说明是正常打断，不需要报错
+		if ctx.Err() == context.Canceled {
+			log.Printf("[WS] Pipeline 被打断")
+			return
+		}
 		log.Printf("[WS] Pipeline 执行错误: %v", err)
 		sendJSON(conn, "error", err.Error())
 		return
 	}
 
-	// 检查是否有意图短路
-	if ctx.Transcript == "" {
-		// 未识别到语音
+	// 检查是否有意图短路或被取消
+	if pCtx.Transcript == "" || ctx.Err() != nil {
 		sendJSON(conn, "state", "idle")
 		return
 	}
 
 	// 发送 STT 结果
-	sendJSON(conn, "stt_final", ctx.Transcript)
+	sendJSON(conn, "stt_final", pCtx.Transcript)
 
 	// 发送 TTS 音频 (如果有)
-	if len(ctx.OutputAudio) > 0 {
+	if len(pCtx.OutputAudio) > 0 {
+		// 在发送音频前再次检查是否被打断
+		if ctx.Err() != nil {
+			return
+		}
 		sendJSON(conn, "state", "speaking")
-		if err := conn.WriteMessage(websocket.BinaryMessage, ctx.OutputAudio); err != nil {
+		if err := conn.WriteMessage(websocket.BinaryMessage, pCtx.OutputAudio); err != nil {
 			log.Printf("[WS] 发送音频失败: %v", err)
 		}
 	}

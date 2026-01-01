@@ -2,7 +2,7 @@
 // 负责音频采集、WebSocket 通信和状态管理
 
 class VoiceClient {
-    constructor(url, onStateChange, onTranscript, onAudio) {
+    constructor(url, onStateChange, onTranscript, onAudio, onSpeechStart) {
         this.url = url;
         this.socket = null;
         this.audioContext = null;
@@ -14,6 +14,7 @@ class VoiceClient {
         this.onStateChange = onStateChange || (() => {});
         this.onTranscript = onTranscript || (() => {});
         this.onAudio = onAudio || (() => {});
+        this.onSpeechStart = onSpeechStart || (() => {});
     }
 
     // 连接 WebSocket
@@ -98,6 +99,26 @@ class VoiceClient {
                 
                 // 获取 PCM 数据 (Float32: -1.0 ~ 1.0)
                 const inputData = e.inputBuffer.getChannelData(0);
+
+                // --- 噪音门 (Noise Gate) ---
+                let sum = 0;
+                for (let i = 0; i < inputData.length; i++) {
+                    sum += inputData[i] * inputData[i];
+                }
+                const rms = Math.sqrt(sum / inputData.length);
+                
+                // 阈值设为 0.01 (可根据环境调整)
+                if (rms < 0.01) {
+                    this.isSpeaking = false;
+                    return; // 忽略噪音
+                }
+                
+                // 检测到语音开始
+                if (!this.isSpeaking) {
+                    this.isSpeaking = true;
+                    this.onSpeechStart();
+                }
+                // -------------------------
                 
                 // 转换为 Int16 PCM (百度 STT 需要)
                 const pcmData = this.floatTo16BitPCM(inputData);

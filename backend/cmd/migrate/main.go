@@ -6,8 +6,15 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 	"voice-memory/internal/service"
 )
+
+// SessionData 本地定义旧数据结构
+type SessionData struct {
+	Sessions  map[string]service.Session `json:"sessions"`
+	UpdatedAt time.Time                  `json:"updated_at"`
+}
 
 func main() {
 	dataDir := "./data"
@@ -55,7 +62,7 @@ func migrateSessions(db *service.Database, sessionFile string) error {
 		return err
 	}
 
-	var sessionData service.SessionData
+	var sessionData SessionData
 	if err := json.Unmarshal(data, &sessionData); err != nil {
 		return err
 	}
